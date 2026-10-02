@@ -266,47 +266,182 @@
     }
   }
 
-  function wrapSelection(before, after, placeholder) {
-    const ta = el.content;
-    const { selectionStart: start, selectionEnd: end } = ta;
-    const selected = ta.value.slice(start, end) || placeholder;
-    replaceRange(start, end, before + selected + after);
-    ta.setSelectionRange(start + before.length, start + before.length + selected.length);
+  function lineStartOf(value, pos) {
+    return pos === 0 ? 0 : value.lastIndexOf("\n", pos - 1) + 1;
   }
 
-  /** 對選取範圍的每一行加上（或移除）前綴，例如清單、引言、標題。 */
-  function prefixLines(makePrefix) {
+  function lineEndOf(value, pos) {
+    const end = value.indexOf("\n", pos);
+    return end === -1 ? value.length : end;
+  }
+
+  /**
+   * 用標記包住選取文字（粗體、連結…）。
+   * 沒有選取時插入提示文字並反白它，直接打字即可取代；
+   * 有選取時游標移到結尾（或 caretFromEnd 指定的位置），可以直接繼續輸入。
+   */
+  function wrapSelection(before, after, placeholder, caretFromEnd = 0) {
+    const ta = el.content;
+    const { selectionStart: start, selectionEnd: end } = ta;
+    const selected = ta.value.slice(start, end);
+    const inner = selected || placeholder;
+    const text = before + inner + after;
+    replaceRange(start, end, text);
+    if (selected) {
+      const caret = start + text.length - caretFromEnd;
+      ta.setSelectionRange(caret, caret);
+    } else {
+      ta.setSelectionRange(start + before.length, start + before.length + inner.length);
+    }
+  }
+
+  // 行首格式：match 判斷該行是否已是這種格式（全部都是就取消），strip 是套用前要先移除的舊標記
+  const LIST_MARKER = /^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/;
+  const LINE_FORMATS = {
+    heading: { prefix: () => "## ", match: /^#{1,6}\s+/, strip: /^#{1,6}\s+/ },
+    ul: { prefix: () => "- ", match: /^[-*+]\s+(?!\[[ xX]\])/, strip: LIST_MARKER },
+    ol: { prefix: (i) => `${i + 1}. `, match: /^\d+[.)]\s+/, strip: LIST_MARKER },
+    task: { prefix: () => "- [ ] ", match: /^[-*+]\s+\[[ xX]\]\s+/, strip: LIST_MARKER },
+    quote: { prefix: () => "> ", match: /^>\s?/, strip: null },
+  };
+
+  /**
+   * 對游標所在行（或選取的多行）套用／取消行首格式，例如清單、引言、標題。
+   * 例如「- 項目」按「1. 清單」會直接換成「1. 項目」。
+   * 完成後不留反白：單一游標維持在原本文字中的位置，多行選取則把游標放在最後。
+   */
+  function formatLines(format) {
     const ta = el.content;
     const value = ta.value;
-    const start = ta.selectionStart === 0 ? 0 : value.lastIndexOf("\n", ta.selectionStart - 1) + 1;
-    let end = value.indexOf("\n", ta.selectionEnd);
-    if (end === -1) end = value.length;
-    const lines = value.slice(start, end).split("\n");
-    const prefixes = lines.map((_, i) => makePrefix(i));
-    const allPrefixed = lines.every((line, i) => line.startsWith(prefixes[i]));
-    const result = lines
-      .map((line, i) => (allPrefixed ? line.slice(prefixes[i].length) : prefixes[i] + line))
-      .join("\n");
+    const { selectionStart, selectionEnd } = ta;
+    const start = lineStartOf(value, selectionStart);
+    const end = lineEndOf(value, selectionEnd);
+    const lines = value.slice(start, end).split("\n").map((line) => {
+      const [, indent, rest] = /^(\s*)(.*)$/.exec(line);
+      return { indent, rest, body: rest };
+    });
+    // 選取多行時略過空白行，避免產生空的清單項目
+    const targets = lines.length > 1 ? lines.filter((l) => l.rest.trim() !== "") : lines;
+    const removing = targets.length > 0 && targets.every((l) => format.match.test(l.rest));
+    targets.forEach((l, i) => {
+      if (removing) {
+        l.body = l.rest.replace(format.match, "");
+        l.rest = l.body;
+      } else {
+        l.body = format.strip ? l.rest.replace(format.strip, "") : l.rest;
+        l.rest = format.prefix(i) + l.body;
+      }
+    });
+    const result = lines.map((l) => l.indent + l.rest).join("\n");
     replaceRange(start, end, result);
-    ta.setSelectionRange(start, start + result.length);
+
+    let caret = start + result.length;
+    if (selectionStart === selectionEnd) {
+      // 保持游標與行尾的距離不變，但不落在標記中間
+      const fromLineEnd = end - selectionStart;
+      caret = Math.max(caret - fromLineEnd, caret - lines[0].body.length);
+    }
+    ta.setSelectionRange(caret, caret);
   }
 
   const actions = {
     bold: () => wrapSelection("**", "**", "粗體文字"),
     italic: () => wrapSelection("*", "*", "斜體文字"),
-    heading: () => prefixLines(() => "## "),
-    ul: () => prefixLines(() => "- "),
-    ol: () => prefixLines((i) => `${i + 1}. `),
-    task: () => prefixLines(() => "- [ ] "),
-    quote: () => prefixLines(() => "> "),
+    heading: () => formatLines(LINE_FORMATS.heading),
+    ul: () => formatLines(LINE_FORMATS.ul),
+    ol: () => formatLines(LINE_FORMATS.ol),
+    task: () => formatLines(LINE_FORMATS.task),
+    quote: () => formatLines(LINE_FORMATS.quote),
     code: () => {
       const ta = el.content;
       const selected = ta.value.slice(ta.selectionStart, ta.selectionEnd);
       if (selected.includes("\n")) wrapSelection("```\n", "\n```", "");
       else wrapSelection("`", "`", "程式碼");
     },
-    link: () => wrapSelection("[", "](https://)", "連結文字"),
+    // 有選取文字時，游標停在網址的位置方便直接貼上
+    link: () => wrapSelection("[", "](https://)", "連結文字", 1),
   };
+
+  // ---------- 清單自動延續 ----------
+
+  const LIST_ITEM_RE = /^(\s*)(?:([-*+])|(\d+)([.)]))(\s+)(\[[ xX]\]\s+)?/;
+  const QUOTE_RE = /^\s*>\s?/;
+
+  /**
+   * 在清單／引言行按 Enter：自動在下一行加上標記（數字清單會遞增：1. → 2. → 3.）。
+   * 在空的項目上按 Enter 則結束清單。Shift+Enter 為一般換行。
+   */
+  function continueList(e) {
+    // isComposing / 229：中文輸入法選字時的 Enter 不處理
+    if (e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey
+        || e.isComposing || e.keyCode === 229) return;
+    const ta = el.content;
+    const pos = ta.selectionStart;
+    if (pos !== ta.selectionEnd) return;
+    const value = ta.value;
+    const lineStart = lineStartOf(value, pos);
+    const lineEnd = lineEndOf(value, pos);
+    const beforeCaret = value.slice(lineStart, pos);
+    const item = LIST_ITEM_RE.exec(beforeCaret);
+    const quote = item ? null : QUOTE_RE.exec(beforeCaret);
+    if (!item && !quote) return;
+
+    e.preventDefault();
+    const markerLength = (item || quote)[0].length;
+    const isEmpty = beforeCaret.slice(markerLength).trim() === "" && value.slice(pos, lineEnd).trim() === "";
+    if (isEmpty) {
+      // 空項目 → 移除標記、結束清單。保留一個空行，否則下一行文字會被 Markdown 併入上一個項目
+      replaceRange(lineStart, lineEnd, "\n");
+      ta.setSelectionRange(lineStart + 1, lineStart + 1);
+      return;
+    }
+
+    let nextMarker;
+    if (item) {
+      const [, indent, bullet, number, delimiter, space, checkbox] = item;
+      nextMarker = indent + (number ? `${Number(number) + 1}${delimiter}` : bullet) + space;
+      if (checkbox) nextMarker += "[ ] ";
+    } else {
+      nextMarker = quote[0];
+    }
+    const insert = "\n" + nextMarker;
+    replaceRange(pos, pos, insert);
+    ta.setSelectionRange(pos + insert.length, pos + insert.length);
+    if (item && item[3]) renumberList(pos + 1, item[1], Number(item[3]) + 1);
+  }
+
+  /** 從新插入的編號項目之後，把同一層的數字清單重新編號（在中間插入項目時用）。 */
+  function renumberList(newLineStart, indent, number) {
+    const ta = el.content;
+    const value = ta.value;
+    const newLineEnd = value.indexOf("\n", newLineStart);
+    if (newLineEnd === -1) return;
+    const blockStart = newLineEnd + 1;
+    const lines = value.slice(blockStart).split("\n");
+    const renumbered = [];
+    let expected = number + 1;
+    let changed = false;
+    for (const line of lines) {
+      if (line.trim() === "") break;
+      const m = /^(\s*)(\d+)([.)]\s.*)$/.exec(line);
+      if (m && m[1] === indent) {
+        if (Number(m[2]) !== expected) changed = true;
+        renumbered.push(`${indent}${expected}${m[3]}`);
+        expected += 1;
+      } else if (/^\s*/.exec(line)[0].length > indent.length) {
+        renumbered.push(line);  // 更深層的巢狀內容，保留原樣
+      } else {
+        break;
+      }
+    }
+    if (!changed) return;
+    const caret = ta.selectionStart;
+    const blockEnd = blockStart + lines.slice(0, renumbered.length).join("\n").length;
+    replaceRange(blockStart, blockEnd, renumbered.join("\n"));
+    ta.setSelectionRange(caret, caret);
+  }
+
+  el.content.addEventListener("keydown", continueList);
 
   // ---------- 圖片 ----------
 
