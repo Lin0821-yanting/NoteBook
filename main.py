@@ -5,15 +5,19 @@
     python main.py
 然後用瀏覽器開啟 http://127.0.0.1:5000
 """
+import base64
+import io
+import json
 import re
 import secrets
 import sqlite3
 import uuid
+from datetime import date, datetime
 from functools import wraps
 from pathlib import Path
 
 from flask import (Flask, abort, flash, g, jsonify, redirect, render_template,
-                   request, send_from_directory, session, url_for)
+                   request, send_file, send_from_directory, session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from db import get_db, init_app
@@ -28,6 +32,11 @@ DEFAULT_TITLE = "未命名筆記"
 MAX_TITLE_LEN = 200
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 IMAGE_MIME = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
+
+# 筆記內的上傳圖片網址，例如 /uploads/3/0123...cdef.png（前面不能接網域，避免誤改外部網址）
+UPLOAD_URL_RE = re.compile(r"(?<![\w/])/uploads/(\d+)/([0-9a-f]{32}\.(?:png|jpg|gif|webp))")
+DATA_URI_RE = re.compile(r"data:image/(?:png|jpe?g|gif|webp);base64,([A-Za-z0-9+/]+={0,2})")
+TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 
 WELCOME_NOTE = """# 歡迎使用 Markdown 筆記本 👋
 
@@ -334,6 +343,116 @@ def serve_upload(user_id, name):
     if user_id != g.user["id"]:
         abort(404)
     return send_from_directory(UPLOAD_DIR / str(user_id), name)
+
+
+# ---------------------------------------------------------------------------
+# 上傳 / 下載：單篇 .md 匯入匯出、全部筆記 JSON 備份還原
+# 匯出時把圖片轉成 base64 內嵌，檔案可獨立開啟；匯入時再轉回上傳檔。
+# ---------------------------------------------------------------------------
+
+def inline_images(markdown, user_id):
+    def to_data_uri(match):
+        path = UPLOAD_DIR / match.group(1) / match.group(2)
+        if int(match.group(1)) != user_id or not path.is_file():
+            return match.group(0)
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:{IMAGE_MIME[path.suffix[1:]]};base64,{encoded}"
+    return UPLOAD_URL_RE.sub(to_data_uri, markdown)
+
+
+def extract_data_images(markdown, user_id):
+    def to_upload_url(match):
+        try:
+            data = base64.b64decode(match.group(1), validate=True)
+        except ValueError:
+            return match.group(0)
+        ext = detect_image_ext(data)
+        if ext is None or len(data) > MAX_IMAGE_BYTES:
+            return match.group(0)
+        return save_image(user_id, data, ext)
+    return DATA_URI_RE.sub(to_upload_url, markdown)
+
+
+def safe_filename(name):
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", name).strip(" .")
+    return name[:100] or "note"
+
+
+def download(data, filename, mimetype):
+    return send_file(io.BytesIO(data), mimetype=mimetype, as_attachment=True,
+                     download_name=filename)
+
+
+@app.get("/api/notes/<int:note_id>/export")
+@login_required
+def export_note(note_id):
+    note = note_or_404(note_id)
+    markdown = inline_images(note["content"], g.user["id"])
+    return download(markdown.encode("utf-8"), safe_filename(note["title"]) + ".md",
+                    "text/markdown")
+
+
+@app.post("/api/notes/import")
+@login_required
+def import_note():
+    file = request.files.get("file")
+    if file is None or not file.filename.lower().endswith((".md", ".markdown", ".txt")):
+        return jsonify(error="請選擇 .md 檔案"), 400
+    try:
+        content = file.read().decode("utf-8-sig").replace("\r\n", "\n")
+    except UnicodeDecodeError:
+        return jsonify(error="檔案需為 UTF-8 編碼"), 400
+    # 標題：第一行若是「# 標題」就用它，否則用檔名
+    first_line = content.lstrip("\n").split("\n", 1)[0]
+    heading = re.match(r"#\s+(.+)", first_line)
+    title = heading.group(1).strip() if heading else Path(file.filename).stem
+    note_id = insert_note(g.user["id"], title, extract_data_images(content, g.user["id"]))
+    return jsonify(dict(note_or_404(note_id))), 201
+
+
+@app.get("/api/backup")
+@login_required
+def backup():
+    user_id = g.user["id"]
+    rows = get_db().execute(
+        "SELECT title, content, created_at, updated_at FROM notes WHERE user_id = ? ORDER BY id",
+        (user_id,),
+    )
+    payload = {
+        "app": "markdown-notebook",
+        "version": 1,
+        "exported_at": datetime.now().isoformat(timespec="seconds"),
+        "notes": [{**dict(row), "content": inline_images(row["content"], user_id)} for row in rows],
+    }
+    data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    return download(data, f"notebook-backup-{date.today():%Y%m%d}.json", "application/json")
+
+
+@app.post("/api/restore")
+@login_required
+def restore():
+    """把備份檔中的筆記「新增」到目前帳號，不會覆蓋既有筆記。"""
+    file = request.files.get("file")
+    try:
+        notes = json.loads(file.read().decode("utf-8-sig"))["notes"]
+        if not isinstance(notes, list):
+            raise ValueError
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return jsonify(error="不是有效的備份檔"), 400
+
+    def timestamp(value):
+        return value if isinstance(value, str) and TIMESTAMP_RE.fullmatch(value) else None
+
+    user_id = g.user["id"]
+    imported = 0
+    for note in notes:
+        if not isinstance(note, dict) or not isinstance(note.get("content", ""), str):
+            continue
+        insert_note(user_id, note.get("title"),
+                    extract_data_images(note.get("content", ""), user_id),
+                    timestamp(note.get("created_at")), timestamp(note.get("updated_at")))
+        imported += 1
+    return jsonify(imported=imported)
 
 
 if __name__ == "__main__":

@@ -359,6 +359,72 @@
     uploadImages(e.dataTransfer.files);
   });
 
+  // ---------- 上傳 / 下載 ----------
+
+  function downloadFrom(url) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "";  // 檔名由伺服器的 Content-Disposition 決定
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+
+  /** 開啟檔案選擇器，選完後把檔案交給 handler，並清空 input 以便重選同一個檔案。 */
+  function bindFilePicker(buttonSel, inputSel, handler) {
+    const input = $(inputSel);
+    $(buttonSel).addEventListener("click", () => input.click());
+    input.addEventListener("change", async () => {
+      const files = [...input.files];
+      input.value = "";
+      if (files.length) await handler(files);
+    });
+  }
+
+  $("#btn-export").addEventListener("click", async () => {
+    await save();
+    if (state.currentId != null) downloadFrom(`/api/notes/${state.currentId}/export`);
+  });
+
+  $("#btn-backup").addEventListener("click", async () => {
+    await save();
+    downloadFrom("/api/backup");
+  });
+
+  bindFilePicker("#btn-import", "#file-import", async (files) => {
+    if (!(await flushSave())) return;
+    let last = null;
+    for (const file of files) {
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        last = await api("/api/notes/import", { method: "POST", body: form });
+      } catch (err) {
+        toast(`「${file.name}」匯入失敗：${err.message}`, "error");
+      }
+    }
+    if (!last) return;
+    el.search.value = "";
+    await loadList();
+    await openNote(last.id);
+    toast(files.length > 1 ? `已匯入 ${files.length} 個檔案` : `已匯入「${last.title}」`);
+  });
+
+  bindFilePicker("#btn-restore", "#file-restore", async ([file]) => {
+    if (!confirm(`要從「${file.name}」還原嗎？\n備份中的筆記會「新增」到目前帳號，不會覆蓋現有筆記。`)) return;
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const { imported } = await api("/api/restore", { method: "POST", body: form });
+      el.search.value = "";
+      await loadList();
+      if (state.currentId == null && state.notes.length) await openNote(state.notes[0].id);
+      toast(`已還原 ${imported} 篇筆記`);
+    } catch (err) {
+      toast(`還原失敗：${err.message}`, "error");
+    }
+  });
+
   // ---------- 檢視模式 ----------
 
   function setView(mode) {

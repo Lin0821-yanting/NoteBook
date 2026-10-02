@@ -19,6 +19,13 @@
     <input type="search" id="search" placeholder="搜尋標題或內容…" aria-label="搜尋筆記">
     <ul class="note-list" id="note-list"></ul>
     <p class="list-empty" id="list-empty" hidden>還沒有筆記</p>
+    <div class="sidebar-footer">
+      <button type="button" class="btn ghost" id="btn-import" title="上傳 .md 檔建立新筆記">⬆ 匯入 .md 檔</button>
+      <button type="button" class="btn ghost" id="btn-backup" title="下載全部筆記（含圖片）為 JSON">💾 備份全部筆記</button>
+      <button type="button" class="btn ghost" id="btn-restore" title="從備份 JSON 還原筆記">♻ 從備份還原</button>
+      <input type="file" id="file-import" accept=".md,.markdown,.txt,text/markdown" multiple hidden>
+      <input type="file" id="file-restore" accept=".json,application/json" hidden>
+    </div>
   </aside>
 
   <main class="editor-area">
@@ -51,6 +58,7 @@
           <button type="button" data-view="split">分割</button>
           <button type="button" data-view="preview">預覽</button>
         </div>
+        <button type="button" class="btn" id="btn-export" title="下載為 .md（圖片會內嵌在檔案中）">⬇ 下載 .md</button>
         <button type="button" class="btn danger" id="btn-delete" title="刪除這篇筆記">🗑 刪除</button>
       </div>
 
