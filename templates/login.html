@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% set is_register = mode == "register" %}
+
+{% block title %}{{ "註冊" if is_register else "登入" }} · Markdown 筆記本{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+
+{% block body %}
+<main class="auth-card">
+  <div class="auth-brand"><span class="brand-icon">📒</span>Markdown 筆記本</div>
+  <p class="muted">在瀏覽器裡撰寫、整理你的 Markdown 筆記</p>
+
+  <nav class="tabs">
+    <a href="{{ url_for('login') }}" class="{{ '' if is_register else 'active' }}">登入</a>
+    <a href="{{ url_for('register') }}" class="{{ 'active' if is_register else '' }}">註冊</a>
+  </nav>
+
+  {% include "_flashes.html" %}
+
+  <form method="post" class="form">
+    <label>帳號
+      <input name="username" value="{{ username }}" required minlength="3" maxlength="20"
+             autocomplete="username" autofocus>
+    </label>
+    <label>密碼
+      <input type="password" name="password" required
+             {% if is_register %}minlength="6"{% endif %}
+             autocomplete="{{ 'new-password' if is_register else 'current-password' }}">
+    </label>
+    {% if is_register %}
+    <label>確認密碼
+      <input type="password" name="confirm" required minlength="6" autocomplete="new-password">
+    </label>
+    <p class="hint">帳號 3–20 個字（中英文、數字、底線），密碼至少 6 個字元。</p>
+    {% endif %}
+    <button type="submit" class="btn primary block">{{ "建立帳號" if is_register else "登入" }}</button>
+  </form>
+</main>
+{% endblock %}
