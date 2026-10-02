@@ -1,0 +1,11 @@
+# 執行期資料（資料庫、金鑰、使用者上傳）
+instance/
+uploads/
+
+# Python
+__pycache__/
+*.pyc
+
+# 編輯器
+.vscode/
+.idea/
