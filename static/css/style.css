@@ -332,8 +332,10 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
   padding: 6px 16px 10px;
   border-bottom: 1px solid var(--border);
 }
+.toolbar > * { flex-shrink: 0; }
 .tool {
   min-width: 32px;
+  white-space: nowrap;
   padding: 5px 9px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -351,6 +353,7 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
 .seg { display: inline-flex; margin-right: 6px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .seg button {
   padding: 5px 10px;
+  white-space: nowrap;
   border: 0;
   background: transparent;
   color: var(--muted);
