@@ -11,7 +11,7 @@ import sqlite3
 from functools import wraps
 from pathlib import Path
 
-from flask import (Flask, flash, g, jsonify, redirect, render_template,
+from flask import (Flask, abort, flash, g, jsonify, redirect, render_template,
                    request, session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -23,6 +23,32 @@ UPLOAD_DIR = BASE_DIR / "uploads"
 
 USERNAME_RE = re.compile(r"^\w{3,20}$")  # 中英文、數字、底線，3–20 字
 MIN_PASSWORD_LEN = 6
+DEFAULT_TITLE = "未命名筆記"
+MAX_TITLE_LEN = 200
+
+WELCOME_NOTE = """# 歡迎使用 Markdown 筆記本 👋
+
+這是一篇範例筆記，可以直接修改或刪除。
+
+## 常用語法
+- **粗體**、*斜體*、`行內程式碼`
+- [連結](https://commonmark.org/help/)
+- [x] 已完成的待辦
+- [ ] 未完成的待辦
+
+> 引言區塊
+
+```python
+print("Hello, vibe coding!")
+```
+
+| 功能 | 操作方式 |
+| --- | --- |
+| 新增筆記 | 左側「＋ 新增筆記」 |
+| 儲存 | 自動儲存，或按 Ctrl+S |
+| 插入圖片 | 工具列 🖼、直接貼上或拖放圖片 |
+| 下載 | 工具列「下載 .md」，圖片會一起打包 |
+"""
 
 
 def load_secret_key():
@@ -132,6 +158,7 @@ def register():
                 error = "這個帳號已經有人使用"
             else:
                 start_session(cur.lastrowid)
+                insert_note(cur.lastrowid, "歡迎使用 Markdown 筆記本", WELCOME_NOTE)
                 flash(f"註冊成功，歡迎 {username}！", "success")
                 return redirect(url_for("notes_page"))
         flash(error, "error")
@@ -153,6 +180,101 @@ def logout():
 @login_required
 def notes_page():
     return render_template("notes.html", sidebar_toggle=True)
+
+
+# ---------------------------------------------------------------------------
+# 筆記 API（每個查詢都限定 user_id，使用者只能存取自己的筆記）
+# ---------------------------------------------------------------------------
+
+@app.errorhandler(404)
+@app.errorhandler(413)
+def api_error(err):
+    if request.path.startswith("/api/"):
+        message = "檔案太大" if err.code == 413 else "找不到資料"
+        return jsonify(error=message), err.code
+    return err
+
+
+def clean_title(title):
+    title = str(title or "").strip()[:MAX_TITLE_LEN]
+    return title or DEFAULT_TITLE
+
+
+def insert_note(user_id, title, content, created_at=None, updated_at=None):
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO notes (user_id, title, content, created_at, updated_at) "
+        "VALUES (?, ?, ?, COALESCE(?, datetime('now', 'localtime')), "
+        "COALESCE(?, datetime('now', 'localtime')))",
+        (user_id, clean_title(title), content or "", created_at, updated_at),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def note_or_404(note_id):
+    note = get_db().execute(
+        "SELECT * FROM notes WHERE id = ? AND user_id = ?", (note_id, g.user["id"])
+    ).fetchone()
+    if note is None:
+        abort(404)
+    return note
+
+
+@app.get("/api/notes")
+@login_required
+def list_notes():
+    sql = "SELECT id, title, updated_at FROM notes WHERE user_id = ?"
+    params = [g.user["id"]]
+    keyword = request.args.get("q", "").strip()
+    if keyword:
+        like = "%" + re.sub(r"([\\%_])", r"\\\1", keyword) + "%"
+        sql += r" AND (title LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\')"
+        params += [like, like]
+    sql += " ORDER BY updated_at DESC, id DESC"
+    return jsonify([dict(row) for row in get_db().execute(sql, params)])
+
+
+@app.post("/api/notes")
+@login_required
+def create_note():
+    data = request.get_json(silent=True) or {}
+    note_id = insert_note(g.user["id"], data.get("title"), data.get("content"))
+    return jsonify(dict(note_or_404(note_id))), 201
+
+
+@app.get("/api/notes/<int:note_id>")
+@login_required
+def get_note(note_id):
+    return jsonify(dict(note_or_404(note_id)))
+
+
+@app.put("/api/notes/<int:note_id>")
+@login_required
+def update_note(note_id):
+    note = note_or_404(note_id)
+    data = request.get_json(silent=True) or {}
+    content = data.get("content", note["content"])
+    if not isinstance(content, str):
+        return jsonify(error="內容格式錯誤"), 400
+    db = get_db()
+    db.execute(
+        "UPDATE notes SET title = ?, content = ?, updated_at = datetime('now', 'localtime') "
+        "WHERE id = ?",
+        (clean_title(data.get("title", note["title"])), content, note_id),
+    )
+    db.commit()
+    return jsonify(dict(note_or_404(note_id)))
+
+
+@app.delete("/api/notes/<int:note_id>")
+@login_required
+def delete_note(note_id):
+    note_or_404(note_id)
+    db = get_db()
+    db.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    db.commit()
+    return "", 204
 
 
 if __name__ == "__main__":

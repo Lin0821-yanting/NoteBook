@@ -9,3 +9,6 @@ __pycache__/
 # 編輯器
 .vscode/
 .idea/
+
+# 本機工具設定（含本機路徑）
+.claude/

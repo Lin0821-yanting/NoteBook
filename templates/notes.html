@@ -3,8 +3,64 @@
 {% block title %}我的筆記 · Markdown 筆記本{% endblock %}
 {% block body_class %}app-page{% endblock %}
 
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/18.0.14/lib/marked.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.16/purify.min.js"></script>
+<script src="{{ url_for('static', filename='js/editor.js') }}" defer></script>
+{% endblock %}
+
 {% block body %}
 {% include "_topbar.html" %}
 {% include "_flashes.html" %}
-<main class="empty-state">筆記編輯器建置中…</main>
+
+<div class="app" id="app">
+  <aside class="sidebar" id="sidebar">
+    <button type="button" class="btn primary block" id="btn-new">＋ 新增筆記</button>
+    <input type="search" id="search" placeholder="搜尋標題或內容…" aria-label="搜尋筆記">
+    <ul class="note-list" id="note-list"></ul>
+    <p class="list-empty" id="list-empty" hidden>還沒有筆記</p>
+  </aside>
+
+  <main class="editor-area">
+    <div class="empty-state" id="empty-state">
+      <span class="big">📝</span>
+      選擇左側筆記，或按「＋ 新增筆記」開始寫作
+    </div>
+
+    <section class="editor" id="editor" hidden>
+      <div class="editor-head">
+        <input id="title" class="title-input" maxlength="200" placeholder="筆記標題" aria-label="筆記標題">
+        <span class="save-status" id="save-status" aria-live="polite"></span>
+      </div>
+
+      <div class="toolbar" role="toolbar" aria-label="Markdown 工具列">
+        <button type="button" class="tool" data-md="bold" title="粗體 (Ctrl+B)"><b>B</b></button>
+        <button type="button" class="tool" data-md="italic" title="斜體 (Ctrl+I)"><i>I</i></button>
+        <button type="button" class="tool" data-md="heading" title="標題">H</button>
+        <span class="sep"></span>
+        <button type="button" class="tool" data-md="ul" title="項目清單">• 清單</button>
+        <button type="button" class="tool" data-md="ol" title="編號清單">1. 清單</button>
+        <button type="button" class="tool" data-md="task" title="待辦清單">☑ 待辦</button>
+        <button type="button" class="tool" data-md="quote" title="引言">❝ 引言</button>
+        <button type="button" class="tool" data-md="code" title="程式碼">&lt;/&gt;</button>
+        <button type="button" class="tool" data-md="link" title="連結">🔗 連結</button>
+        <span class="spacer"></span>
+        <div class="seg" id="view-mode" role="group" aria-label="檢視模式">
+          <button type="button" data-view="edit">編輯</button>
+          <button type="button" data-view="split">分割</button>
+          <button type="button" data-view="preview">預覽</button>
+        </div>
+        <button type="button" class="btn danger" id="btn-delete" title="刪除這篇筆記">🗑 刪除</button>
+      </div>
+
+      <div class="panes view-split" id="panes">
+        <textarea id="content" spellcheck="false" aria-label="Markdown 內容"
+                  placeholder="用 Markdown 開始寫作…"></textarea>
+        <article id="preview" class="markdown-body" aria-label="預覽"></article>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
 {% endblock %}
