@@ -10,6 +10,7 @@ import io
 import json
 import re
 import secrets
+import shutil
 import sqlite3
 import uuid
 from datetime import date, datetime
@@ -200,6 +201,74 @@ def logout():
 @login_required
 def notes_page():
     return render_template("notes.html", sidebar_toggle=True)
+
+
+# ---------------------------------------------------------------------------
+# 帳號管理
+# ---------------------------------------------------------------------------
+
+def format_size(num_bytes):
+    for unit in ("B", "KB", "MB"):
+        if num_bytes < 1024:
+            return f"{num_bytes:.0f} {unit}" if unit == "B" else f"{num_bytes:.1f} {unit}"
+        num_bytes /= 1024
+    return f"{num_bytes:.1f} GB"
+
+
+def verify_password(password):
+    row = get_db().execute(
+        "SELECT password_hash FROM users WHERE id = ?", (g.user["id"],)
+    ).fetchone()
+    return check_password_hash(row["password_hash"], password)
+
+
+@app.get("/account")
+@login_required
+def account():
+    note_count = get_db().execute(
+        "SELECT COUNT(*) FROM notes WHERE user_id = ?", (g.user["id"],)
+    ).fetchone()[0]
+    folder = UPLOAD_DIR / str(g.user["id"])
+    images = [p for p in folder.iterdir() if p.is_file()] if folder.is_dir() else []
+    return render_template(
+        "account.html",
+        note_count=note_count,
+        image_count=len(images),
+        image_size=format_size(sum(p.stat().st_size for p in images)),
+    )
+
+
+@app.post("/account/password")
+@login_required
+def change_password():
+    new_password = request.form.get("new_password", "")
+    if not verify_password(request.form.get("old_password", "")):
+        flash("目前密碼不正確", "error")
+    elif error := validate_password(new_password, request.form.get("confirm", "")):
+        flash(error, "error")
+    else:
+        db = get_db()
+        db.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+                   (generate_password_hash(new_password), g.user["id"]))
+        db.commit()
+        flash("密碼已更新", "success")
+    return redirect(url_for("account"))
+
+
+@app.post("/account/delete")
+@login_required
+def delete_account():
+    if not verify_password(request.form.get("password", "")):
+        flash("密碼不正確，帳號未刪除", "error")
+        return redirect(url_for("account"))
+    user_id = g.user["id"]
+    db = get_db()
+    db.execute("DELETE FROM users WHERE id = ?", (user_id,))  # 筆記會一併 CASCADE 刪除
+    db.commit()
+    shutil.rmtree(UPLOAD_DIR / str(user_id), ignore_errors=True)
+    session.clear()
+    flash("帳號與所有筆記已刪除", "success")
+    return redirect(url_for("login"))
 
 
 # ---------------------------------------------------------------------------

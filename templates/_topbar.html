@@ -5,6 +5,7 @@
   <a class="brand" href="{{ url_for('notes_page') }}"><span class="brand-icon">📒</span>Markdown 筆記本</a>
   <nav class="topnav">
     <span class="user" title="目前登入的帳號">👤 {{ g.user.username }}</span>
+    <a href="{{ url_for('account') }}">帳號管理</a>
     <form method="post" action="{{ url_for('logout') }}">
       <button type="submit" class="link-btn">登出</button>
     </form>

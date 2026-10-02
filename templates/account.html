@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}帳號管理 · Markdown 筆記本{% endblock %}
+{% block body_class %}account-page{% endblock %}
+
+{% block body %}
+{% include "_topbar.html" %}
+
+<main class="account">
+  <a class="back" href="{{ url_for('notes_page') }}">← 回到筆記</a>
+  <h1>帳號管理</h1>
+
+  {% include "_flashes.html" %}
+
+  <section class="card">
+    <h2>帳號資訊</h2>
+    <dl class="info">
+      <dt>帳號</dt><dd>{{ g.user.username }}</dd>
+      <dt>建立時間</dt><dd>{{ g.user.created_at }}</dd>
+      <dt>筆記</dt><dd>{{ note_count }} 篇</dd>
+      <dt>圖片</dt><dd>{{ image_count }} 張（{{ image_size }}）</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>變更密碼</h2>
+    <form method="post" action="{{ url_for('change_password') }}" class="form">
+      <label>目前密碼
+        <input type="password" name="old_password" required autocomplete="current-password">
+      </label>
+      <label>新密碼
+        <input type="password" name="new_password" required minlength="6" autocomplete="new-password">
+      </label>
+      <label>確認新密碼
+        <input type="password" name="confirm" required minlength="6" autocomplete="new-password">
+      </label>
+      <div><button type="submit" class="btn primary">更新密碼</button></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>資料備份</h2>
+    <p class="muted">下載全部筆記（圖片以 base64 內嵌）為 JSON 檔，可在筆記頁「從備份還原」。</p>
+    <a class="btn" href="{{ url_for('backup') }}" download>💾 下載備份</a>
+  </section>
+
+  <section class="card danger-zone">
+    <h2>刪除帳號</h2>
+    <p>將<strong>永久刪除</strong>此帳號、所有筆記與圖片，無法復原。建議先下載備份。</p>
+    <form method="post" action="{{ url_for('delete_account') }}" class="form"
+          onsubmit="return confirm('確定要永久刪除帳號與所有筆記嗎？此動作無法復原。')">
+      <label>輸入密碼以確認
+        <input type="password" name="password" required autocomplete="current-password">
+      </label>
+      <div><button type="submit" class="btn danger">永久刪除帳號</button></div>
+    </form>
+  </section>
+</main>
+{% endblock %}
