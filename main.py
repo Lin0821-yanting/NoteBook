@@ -8,11 +8,12 @@
 import re
 import secrets
 import sqlite3
+import uuid
 from functools import wraps
 from pathlib import Path
 
 from flask import (Flask, abort, flash, g, jsonify, redirect, render_template,
-                   request, session, url_for)
+                   request, send_from_directory, session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from db import get_db, init_app
@@ -25,6 +26,8 @@ USERNAME_RE = re.compile(r"^\w{3,20}$")  # 中英文、數字、底線，3–20 
 MIN_PASSWORD_LEN = 6
 DEFAULT_TITLE = "未命名筆記"
 MAX_TITLE_LEN = 200
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+IMAGE_MIME = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
 
 WELCOME_NOTE = """# 歡迎使用 Markdown 筆記本 👋
 
@@ -66,10 +69,18 @@ app = Flask(__name__)
 app.config.update(
     SECRET_KEY=load_secret_key(),
     DATABASE=str(INSTANCE_DIR / "notebook.db"),
+    MAX_CONTENT_LENGTH=20 * 1024 * 1024,  # 單次請求上限（匯入含圖片的 .md / 備份檔）
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
 )
 init_app(app)
+
+
+@app.after_request
+def set_security_headers(response):
+    # 禁止瀏覽器猜測檔案類型，避免偽裝成圖片的 HTML 被執行
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +286,54 @@ def delete_note(note_id):
     db.execute("DELETE FROM notes WHERE id = ?", (note_id,))
     db.commit()
     return "", 204
+
+
+# ---------------------------------------------------------------------------
+# 圖片：存在 uploads/<user_id>/<uuid>.<ext>，只有擁有者能讀取
+# ---------------------------------------------------------------------------
+
+def detect_image_ext(data):
+    """依檔頭判斷圖片格式，不信任使用者提供的副檔名。"""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def save_image(user_id, data, ext):
+    folder = UPLOAD_DIR / str(user_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}.{ext}"
+    (folder / name).write_bytes(data)
+    return f"/uploads/{user_id}/{name}"
+
+
+@app.post("/api/images")
+@login_required
+def upload_image():
+    file = request.files.get("image")
+    if file is None:
+        return jsonify(error="沒有收到圖片"), 400
+    data = file.read()
+    if len(data) > MAX_IMAGE_BYTES:
+        return jsonify(error="圖片不可超過 5MB"), 400
+    ext = detect_image_ext(data)
+    if ext is None:
+        return jsonify(error="只支援 PNG、JPG、GIF、WebP 圖片"), 400
+    return jsonify(url=save_image(g.user["id"], data, ext)), 201
+
+
+@app.get("/uploads/<int:user_id>/<name>")
+@login_required
+def serve_upload(user_id, name):
+    if user_id != g.user["id"]:
+        abort(404)
+    return send_from_directory(UPLOAD_DIR / str(user_id), name)
 
 
 if __name__ == "__main__":

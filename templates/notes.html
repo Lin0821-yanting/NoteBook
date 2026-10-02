@@ -44,6 +44,7 @@
         <button type="button" class="tool" data-md="quote" title="引言">❝ 引言</button>
         <button type="button" class="tool" data-md="code" title="程式碼">&lt;/&gt;</button>
         <button type="button" class="tool" data-md="link" title="連結">🔗 連結</button>
+        <button type="button" class="tool" id="btn-image" title="插入圖片（也可直接貼上或拖放）">🖼 圖片</button>
         <span class="spacer"></span>
         <div class="seg" id="view-mode" role="group" aria-label="檢視模式">
           <button type="button" data-view="edit">編輯</button>
@@ -55,9 +56,10 @@
 
       <div class="panes view-split" id="panes">
         <textarea id="content" spellcheck="false" aria-label="Markdown 內容"
-                  placeholder="用 Markdown 開始寫作…"></textarea>
+                  placeholder="用 Markdown 開始寫作…（圖片可直接貼上或拖放到這裡）"></textarea>
         <article id="preview" class="markdown-body" aria-label="預覽"></article>
       </div>
+      <input type="file" id="file-image" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
     </section>
   </main>
 </div>

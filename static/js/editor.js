@@ -308,6 +308,57 @@
     link: () => wrapSelection("[", "](https://)", "連結文字"),
   };
 
+  // ---------- 圖片 ----------
+
+  /** 上傳圖片並在游標處插入 Markdown 圖片語法。 */
+  async function uploadImages(fileList) {
+    const files = [...fileList].filter((f) => f.type.startsWith("image/"));
+    if (!files.length || state.currentId == null) return;
+    toast(`上傳 ${files.length} 張圖片中…`);
+    for (const file of files) {
+      const form = new FormData();
+      form.append("image", file);
+      try {
+        const { url } = await api("/api/images", { method: "POST", body: form });
+        const alt = file.name.replace(/\.[^.]+$/, "").replace(/[[\]]/g, "") || "image";
+        const ta = el.content;
+        replaceRange(ta.selectionStart, ta.selectionEnd, `![${alt}](${url})\n`);
+      } catch (err) {
+        toast(`「${file.name}」上傳失敗：${err.message}`, "error");
+        return;
+      }
+    }
+    toast("圖片已插入");
+  }
+
+  const fileImage = $("#file-image");
+  $("#btn-image").addEventListener("click", () => fileImage.click());
+  fileImage.addEventListener("change", () => {
+    uploadImages(fileImage.files);
+    fileImage.value = "";
+  });
+
+  el.content.addEventListener("paste", (e) => {
+    const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+    if (files.length) {
+      e.preventDefault();
+      uploadImages(files);
+    }
+  });
+
+  el.content.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer?.types.includes("Files")) return;
+    e.preventDefault();
+    el.content.classList.add("dragging");
+  });
+  el.content.addEventListener("dragleave", () => el.content.classList.remove("dragging"));
+  el.content.addEventListener("drop", (e) => {
+    el.content.classList.remove("dragging");
+    if (!e.dataTransfer?.files.length) return;
+    e.preventDefault();
+    uploadImages(e.dataTransfer.files);
+  });
+
   // ---------- 檢視模式 ----------
 
   function setView(mode) {
