@@ -235,6 +235,21 @@
     });
   }
 
+  /** 替自己上傳的圖片加上「手寫編輯」按鈕（電腦 hover 時出現，觸控裝置常駐）。 */
+  function addImageEditButtons() {
+    el.preview.querySelectorAll('img[src^="/uploads/"]').forEach((img) => {
+      const wrap = document.createElement("span");
+      wrap.className = "img-edit-wrap";
+      img.replaceWith(wrap);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "img-edit-btn";
+      btn.textContent = "✏️ 手寫編輯";
+      btn.dataset.src = img.getAttribute("src");
+      wrap.append(img, btn);
+    });
+  }
+
   let previewTimer;
   function renderPreview() {
     clearTimeout(previewTimer);
@@ -242,6 +257,7 @@
       const md = el.content.value;
       if (hasMarkdownLib) {
         el.preview.innerHTML = DOMPurify.sanitize(marked.parse(md));
+        addImageEditButtons();
         return;
       }
       const warning = document.createElement("p");
@@ -260,7 +276,9 @@
     const ta = el.content;
     ta.focus();
     ta.setSelectionRange(start, end);
-    if (!document.execCommand("insertText", false, text)) {
+    // 編輯區被隱藏（例如手機的預覽模式）時無法取得焦點，execCommand 會插到別的地方，改用 setRangeText
+    const focused = document.activeElement === ta;
+    if (!focused || !document.execCommand("insertText", false, text)) {
       ta.setRangeText(text, start, end, "end");
       ta.dispatchEvent(new Event("input"));
     }
@@ -446,15 +464,20 @@
   // ---------- 圖片 ----------
 
   /** 上傳圖片並在游標處插入 Markdown 圖片語法。 */
+  async function uploadImageFile(file) {
+    const form = new FormData();
+    form.append("image", file);
+    const { url } = await api("/api/images", { method: "POST", body: form });
+    return url;
+  }
+
   async function uploadImages(fileList) {
     const files = [...fileList].filter((f) => f.type.startsWith("image/"));
     if (!files.length || state.currentId == null) return;
     toast(`上傳 ${files.length} 張圖片中…`);
     for (const file of files) {
-      const form = new FormData();
-      form.append("image", file);
       try {
-        const { url } = await api("/api/images", { method: "POST", body: form });
+        const url = await uploadImageFile(file);
         const alt = file.name.replace(/\.[^.]+$/, "").replace(/[[\]]/g, "") || "image";
         const ta = el.content;
         replaceRange(ta.selectionStart, ta.selectionEnd, `![${alt}](${url})\n`);
@@ -465,6 +488,53 @@
     }
     toast("圖片已插入");
   }
+
+  // ---------- 手寫（畫板在 sketch.js） ----------
+
+  const sketchFile = (blob) => new File([blob], "handwriting.png", { type: "image/png" });
+
+  /** 開啟畫板，完成後上傳並在游標處（獨立一行）插入手寫圖片。 */
+  async function insertSketch() {
+    if (state.currentId == null || !window.Sketch) return;
+    const ta = el.content;
+    const { selectionStart: start, selectionEnd: end } = ta;  // 畫板會搶走焦點，先記住游標
+    const blob = await Sketch.open();
+    if (!blob) return;
+    try {
+      const url = await uploadImageFile(sketchFile(blob));
+      const atLineStart = start === 0 || ta.value[start - 1] === "\n";
+      replaceRange(start, end, `${atLineStart ? "" : "\n"}![手寫](${url})\n`);
+      toast("已插入手寫內容");
+    } catch (err) {
+      toast(`手寫上傳失敗：${err.message}`, "error");
+    }
+  }
+
+  /** 在既有圖片上繼續手寫 / 標註，存成新圖後替換內容中的網址（Ctrl+Z 可復原）。 */
+  async function editImage(src) {
+    const blob = await Sketch.open({ imageUrl: src });
+    if (!blob) return;
+    try {
+      const url = await uploadImageFile(sketchFile(blob));
+      const ta = el.content;
+      const index = ta.value.indexOf(src);
+      if (index === -1) {
+        replaceRange(ta.selectionStart, ta.selectionEnd, `![手寫](${url})\n`);
+        toast("找不到原本的圖片，已插入在游標處");
+        return;
+      }
+      replaceRange(index, index + src.length, url);
+      toast("圖片已更新（Ctrl+Z 可復原）");
+    } catch (err) {
+      toast(`手寫上傳失敗：${err.message}`, "error");
+    }
+  }
+
+  $("#btn-sketch").addEventListener("click", insertSketch);
+  el.preview.addEventListener("click", (e) => {
+    const btn = e.target.closest(".img-edit-btn");
+    if (btn) editImage(btn.dataset.src);
+  });
 
   const fileImage = $("#file-image");
   $("#btn-image").addEventListener("click", () => fileImage.click());

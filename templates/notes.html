@@ -6,6 +6,7 @@
 {% block head %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/18.0.14/lib/marked.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.16/purify.min.js"></script>
+<script src="{{ url_for('static', filename='js/sketch.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/editor.js') }}" defer></script>
 {% endblock %}
 
@@ -69,6 +70,7 @@
         <button type="button" class="tool" data-md="link" title="連結">🔗 連結</button>
         <span class="sep"></span>
         <button type="button" class="tool" id="btn-image" title="插入圖片（電腦可直接貼上或拖放；手機可選相簿或拍照）">🖼 圖片</button>
+        <button type="button" class="tool" id="btn-sketch" title="手寫（觸控筆、手指或滑鼠）">✍ 手寫</button>
       </div>
 
       <div class="panes view-split" id="panes">
@@ -80,6 +82,43 @@
     </section>
   </main>
 </div>
+
+<dialog class="sketch" id="sketch" aria-label="手寫畫板">
+  <div class="sketch-bar">
+    <div class="sketch-tools" role="toolbar" aria-label="手寫工具">
+      <button type="button" class="sk-color" data-color="#1f2328" style="--c:#1f2328" title="黑色筆" aria-label="黑色筆"></button>
+      <button type="button" class="sk-color" data-color="#1c64f2" style="--c:#1c64f2" title="藍色筆" aria-label="藍色筆"></button>
+      <button type="button" class="sk-color" data-color="#e02424" style="--c:#e02424" title="紅色筆" aria-label="紅色筆"></button>
+      <button type="button" class="sk-color" data-color="#0e9f6e" style="--c:#0e9f6e" title="綠色筆" aria-label="綠色筆"></button>
+      <button type="button" class="sk-btn" data-tool="highlighter" title="螢光筆">🖍 螢光筆</button>
+      <button type="button" class="sk-btn" data-tool="eraser" title="橡皮擦">🧽 橡皮擦</button>
+      <span class="sep"></span>
+      <button type="button" class="sk-btn" data-size="thin" title="細" aria-label="細"><span class="sk-dot" style="--d:4px"></span></button>
+      <button type="button" class="sk-btn" data-size="medium" title="中" aria-label="中"><span class="sk-dot" style="--d:7px"></span></button>
+      <button type="button" class="sk-btn" data-size="thick" title="粗" aria-label="粗"><span class="sk-dot" style="--d:11px"></span></button>
+      <span class="sep"></span>
+      <button type="button" class="sk-btn" id="sk-undo" title="復原 (Ctrl+Z)" aria-label="復原">↶</button>
+      <button type="button" class="sk-btn" id="sk-redo" title="重做 (Ctrl+Y)" aria-label="重做">↷</button>
+      <button type="button" class="sk-btn" id="sk-clear" title="清除全部">清除</button>
+      <select id="sk-paper-style" aria-label="紙張樣式">
+        <option value="blank">空白紙</option>
+        <option value="lined">橫線紙</option>
+        <option value="grid">方格紙</option>
+      </select>
+    </div>
+    <div class="sketch-actions">
+      <button type="button" class="btn" id="sk-cancel">取消</button>
+      <button type="button" class="btn primary" id="sk-done">插入筆記</button>
+    </div>
+  </div>
+  <div class="sketch-stage" id="sk-stage">
+    <div class="sketch-sheet" id="sk-sheet">
+      <canvas id="sk-paper-layer"></canvas>
+      <canvas id="sk-ink-layer"></canvas>
+      <canvas id="sk-live-layer"></canvas>
+    </div>
+  </div>
+</dialog>
 
 <div class="toast" id="toast" role="status" hidden></div>
 {% endblock %}
