@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/18.0.14/lib/marked.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.16/purify.min.js"></script>
 <script src="{{ url_for('static', filename='js/sketch.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/tree.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/editor.js') }}" defer></script>
 {% endblock %}
 
@@ -16,10 +17,12 @@
 
 <div class="app" id="app">
   <aside class="sidebar" id="sidebar">
-    <button type="button" class="btn primary block" id="btn-new">＋ 新增筆記</button>
+    <div class="sidebar-actions">
+      <button type="button" class="btn block" id="btn-new-folder" title="在最上層新增資料夾（例如科目名稱）">📁 新增資料夾</button>
+      <button type="button" class="btn primary block" id="btn-new" title="在最上層新增筆記；要放進資料夾請按資料夾旁的「＋」">＋ 新增筆記</button>
+    </div>
     <input type="search" id="search" placeholder="搜尋標題或內容…" aria-label="搜尋筆記">
-    <ul class="note-list" id="note-list"></ul>
-    <p class="list-empty" id="list-empty" hidden>還沒有筆記</p>
+    <div class="tree" id="note-tree" role="tree" aria-label="資料夾與筆記"></div>
     <div class="sidebar-footer">
       <button type="button" class="btn ghost" id="btn-import" title="上傳 .md 檔建立新筆記">⬆ 匯入 .md 檔</button>
       <button type="button" class="btn ghost" id="btn-backup" title="下載全部筆記（含圖片）為 JSON">💾 備份全部筆記</button>
@@ -39,6 +42,9 @@
     </div>
 
     <section class="editor" id="editor" hidden>
+      <div class="editor-crumbs">
+        <button type="button" class="crumb-btn" id="note-location" title="移動到其他資料夾"></button>
+      </div>
       <div class="editor-head">
         <input id="title" class="title-input" maxlength="200" placeholder="筆記標題" aria-label="筆記標題">
         <span class="save-status" id="save-status" aria-live="polite"></span>
@@ -51,6 +57,7 @@
           <button type="button" class="icon-btn" id="btn-menu" title="更多動作" aria-label="更多動作"
                   aria-haspopup="menu" aria-expanded="false">⋯</button>
           <div class="menu-list" role="menu" hidden>
+            <button type="button" role="menuitem" id="btn-move-note">📁 移動到資料夾…</button>
             <button type="button" role="menuitem" id="btn-export">⬇ 下載 .md（含圖片）</button>
             <button type="button" role="menuitem" class="danger" id="btn-delete">🗑 刪除這篇筆記</button>
           </div>
@@ -117,6 +124,35 @@
       <canvas id="sk-ink-layer"></canvas>
       <canvas id="sk-live-layer"></canvas>
     </div>
+  </div>
+</dialog>
+
+<div class="menu-list floating" id="folder-menu" role="menu" hidden>
+  <button type="button" role="menuitem" data-action="subfolder">📁 新增子資料夾</button>
+  <button type="button" role="menuitem" data-action="rename">✏️ 重新命名</button>
+  <button type="button" role="menuitem" data-action="move">↪ 移動到…</button>
+  <button type="button" role="menuitem" data-action="import">⬆ 匯入 .md 到這裡</button>
+  <button type="button" role="menuitem" data-action="delete" class="danger">🗑 刪除資料夾</button>
+</div>
+
+<dialog class="modal" id="move-dialog" aria-labelledby="move-title">
+  <div class="modal-head" id="move-title">移動到…</div>
+  <div class="modal-body"><div class="picker-list" id="move-list"></div></div>
+  <div class="modal-foot">
+    <button type="button" class="btn" id="move-cancel">取消</button>
+  </div>
+</dialog>
+
+<dialog class="modal" id="delete-folder-dialog" aria-labelledby="delete-folder-title">
+  <div class="modal-head" id="delete-folder-title">刪除資料夾</div>
+  <div class="modal-body">
+    <p id="delete-folder-text"></p>
+    <p class="muted">「保留內容」會把裡面的筆記和子資料夾移到上一層，只刪除這個資料夾。</p>
+  </div>
+  <div class="modal-foot">
+    <button type="button" class="btn" data-choice="">取消</button>
+    <button type="button" class="btn" data-choice="move">保留內容，移到上一層</button>
+    <button type="button" class="btn danger-solid" data-choice="delete">連同筆記一起刪除</button>
   </div>
 </dialog>
 

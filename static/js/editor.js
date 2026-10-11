@@ -5,8 +5,8 @@
   const $ = (sel) => document.querySelector(sel);
   const el = {
     app: $("#app"),
-    list: $("#note-list"),
-    listEmpty: $("#list-empty"),
+    tree: $("#note-tree"),
+    location: $("#note-location"),
     search: $("#search"),
     emptyState: $("#empty-state"),
     editor: $("#editor"),
@@ -22,8 +22,10 @@
   const VIEW_MODES = ["edit", "split", "preview"];
 
   const state = {
-    notes: [],                    // 側欄清單 [{id, title, updated_at}]
+    folders: [],                  // [{id, name, parent_id}]
+    notes: [],                    // 側欄清單 [{id, folder_id, title, updated_at}]（搜尋時只有符合的）
     currentId: null,
+    currentFolderId: null,        // 目前筆記所在資料夾，null＝根目錄
     dirty: false,                 // 有尚未送出的修改
     saveTimer: null,
     saving: Promise.resolve(),    // 儲存請求依序串接，避免舊內容覆蓋新內容
@@ -80,40 +82,277 @@
     el.status.classList.toggle("error", kind === "error");
   }
 
-  // ---------- 側欄清單 ----------
+  // ---------- 側欄：資料夾樹（畫面在 tree.js） ----------
+
+  const tree = NoteTree.create(el.tree, {
+    openNote: (id) => (id === state.currentId ? closeDrawer() : openNote(id)),
+    createNote: (folderId) => createNote(folderId),
+    saveFolderName,
+    folderAction: (action, folder) => {
+      if (action === "move") moveFolder(folder);
+      else if (action === "import") importIntoFolder(folder);
+      else if (action === "delete") deleteFolder(folder);
+    },
+    moveItem,
+    formatTime,
+  });
 
   async function loadList() {
     const q = el.search.value.trim();
-    state.notes = await api(`/api/notes${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+    const [folders, notes] = await Promise.all([
+      api("/api/folders"),
+      api(`/api/notes${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+    ]);
+    state.folders = folders;
+    state.notes = notes;
     renderList();
   }
 
   function renderList() {
-    el.list.replaceChildren(...state.notes.map((note) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "note-item" + (note.id === state.currentId ? " active" : "");
-      btn.dataset.id = note.id;
-      const title = document.createElement("span");
-      title.className = "note-title";
-      title.textContent = note.title;
-      const meta = document.createElement("span");
-      meta.className = "note-meta";
-      meta.textContent = formatTime(note.updated_at);
-      btn.append(title, meta);
-      const li = document.createElement("li");
-      li.append(btn);
-      return li;
-    }));
-    el.listEmpty.hidden = state.notes.length > 0;
-    el.listEmpty.textContent = el.search.value.trim() ? "找不到符合的筆記" : "還沒有筆記";
+    tree.render({
+      folders: state.folders,
+      notes: state.notes,
+      currentId: state.currentId,
+      query: el.search.value.trim(),
+    });
+    renderLocation();
   }
 
   function upsertListItem(note) {
-    const summary = { id: note.id, title: note.title, updated_at: note.updated_at };
+    const summary = { id: note.id, folder_id: note.folder_id, title: note.title, updated_at: note.updated_at };
     state.notes = [summary, ...state.notes.filter((n) => n.id !== note.id)];
     renderList();
   }
+
+  /** 資料夾路徑名稱，例如 ["微積分", "期中考"]。 */
+  function folderPath(folderId) {
+    const byId = new Map(state.folders.map((f) => [f.id, f]));
+    const names = [];
+    const seen = new Set();
+    for (let id = folderId; id != null && byId.has(id) && !seen.has(id); id = byId.get(id).parent_id) {
+      seen.add(id);
+      names.unshift(byId.get(id).name);
+    }
+    return names;
+  }
+
+  function folderLabel(folderId) {
+    return folderId == null ? "根目錄" : folderPath(folderId).join(" › ");
+  }
+
+  /** 資料夾本身與所有子孫資料夾的 id。 */
+  function descendantIds(folderId) {
+    const ids = [folderId];
+    for (let i = 0; i < ids.length; i++) {
+      for (const f of state.folders) if (f.parent_id === ids[i]) ids.push(f.id);
+    }
+    return ids;
+  }
+
+  /** 編輯區標題上方的位置（麵包屑），點了可以搬到其他資料夾。 */
+  function renderLocation() {
+    if (state.currentId == null) return;
+    el.location.textContent = state.currentFolderId == null
+      ? "📂 根目錄"
+      : `📁 ${folderPath(state.currentFolderId).join(" › ")}`;
+  }
+
+  // ---------- 資料夾操作 ----------
+
+  async function saveFolderName({ mode, folderId, parentId, name }) {
+    try {
+      if (mode === "create") {
+        const folder = await api("/api/folders", { method: "POST", json: { name, parent_id: parentId } });
+        tree.expand(folder.id);   // 新資料夾預設展開
+        toast(`已建立資料夾「${folder.name}」`);
+      } else {
+        await api(`/api/folders/${folderId}`, { method: "PUT", json: { name } });
+      }
+      await loadList();
+    } catch (err) {
+      toast(err.message, "error");
+      throw err;   // 讓樹上的輸入框保留，方便修改
+    }
+  }
+
+  /** 搬移筆記或資料夾到 targetFolderId（null＝根目錄）。拖放與「移動到…」共用。 */
+  async function moveItem(item, targetFolderId) {
+    try {
+      if (item.type === "note") {
+        if (item.id === state.currentId && !(await flushSave())) return;
+        const note = await api(`/api/notes/${item.id}`, { method: "PUT", json: { folder_id: targetFolderId } });
+        if (note.id === state.currentId) state.currentFolderId = note.folder_id;
+      } else {
+        await api(`/api/folders/${item.id}`, { method: "PUT", json: { parent_id: targetFolderId } });
+      }
+      tree.expand(targetFolderId);
+      await loadList();
+      toast(`已移到「${folderLabel(targetFolderId)}」`);
+    } catch (err) {
+      toast(`移動失敗：${err.message}`, "error");
+    }
+  }
+
+  async function moveCurrentNote() {
+    if (state.currentId == null) return;
+    const target = await pickFolder({
+      title: `移動「${el.title.value.trim() || "未命名筆記"}」到…`,
+      currentFolderId: state.currentFolderId,
+    });
+    if (target !== undefined) await moveItem({ type: "note", id: state.currentId }, target);
+  }
+
+  async function moveFolder(folder) {
+    const target = await pickFolder({
+      title: `移動資料夾「${folder.name}」到…`,
+      currentFolderId: folder.parent_id,
+      disabledIds: new Set(descendantIds(folder.id)),   // 不能搬進自己或子資料夾
+    });
+    if (target !== undefined) await moveItem({ type: "folder", id: folder.id }, target);
+  }
+
+  /**
+   * 開啟對話框並等待使用者選擇；setup(finish, signal) 負責綁定按鈕。
+   * 直接在按鈕事件中 resolve，不依賴 close 事件（分頁在背景時瀏覽器可能不觸發）。
+   * 按 Esc 或其他方式關閉時回傳 undefined。
+   */
+  function openDialog(dialog, setup) {
+    return new Promise((resolve) => {
+      const listeners = new AbortController();
+      const finish = (value) => {
+        listeners.abort();
+        if (dialog.open) dialog.close();
+        resolve(value);
+      };
+      dialog.addEventListener("cancel", (e) => {
+        e.preventDefault();
+        finish(undefined);
+      }, { signal: listeners.signal });
+      dialog.addEventListener("close", () => finish(undefined), { signal: listeners.signal });
+      setup(finish, listeners.signal);
+      dialog.showModal();
+    });
+  }
+
+  /**
+   * 選擇目標資料夾的對話框。回傳資料夾 id、null（根目錄），取消則回傳 undefined。
+   * 點一下就選定，手機上也好操作。
+   */
+  function pickFolder({ title, currentFolderId, disabledIds = new Set() }) {
+    const list = $("#move-list");
+    $("#move-title").textContent = title;
+    list.replaceChildren();
+
+    const addOption = (folderId, label, depth, icon) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "picker-item";
+      btn.style.setProperty("--depth", depth);
+      const isCurrent = folderId === currentFolderId;
+      btn.disabled = isCurrent || disabledIds.has(folderId);
+      const name = document.createElement("span");
+      name.className = "picker-name";
+      name.textContent = `${icon} ${label}`;
+      btn.append(name);
+      if (isCurrent) {
+        const hint = document.createElement("span");
+        hint.className = "hint";
+        hint.textContent = "目前位置";
+        btn.append(hint);
+      }
+      btn.dataset.folderId = folderId ?? "";
+      list.append(btn);
+    };
+
+    addOption(null, "根目錄", 0, "📂");
+    const walk = (parentId, depth) => {
+      state.folders
+        .filter((f) => f.parent_id === parentId)
+        .sort((a, b) => NoteTree.collator.compare(a.name, b.name))
+        .forEach((f) => {
+          addOption(f.id, f.name, depth, "📁");
+          walk(f.id, depth + 1);
+        });
+    };
+    walk(null, 1);
+
+    return openDialog($("#move-dialog"), (finish, signal) => {
+      list.addEventListener("click", (e) => {
+        const btn = e.target.closest(".picker-item");
+        if (btn && !btn.disabled) finish(btn.dataset.folderId === "" ? null : Number(btn.dataset.folderId));
+      }, { signal });
+      $("#move-cancel").addEventListener("click", () => finish(undefined), { signal });
+    });
+  }
+
+  /** 刪除資料夾：有內容時讓使用者選「移到上一層」或「連同筆記刪除」。 */
+  async function deleteFolder(folder) {
+    const ids = new Set(descendantIds(folder.id));
+    let allNotes;
+    try {
+      allNotes = await api("/api/notes");   // 搜尋中 state.notes 不完整，重新取得全部來計數
+    } catch (err) {
+      toast(err.message, "error");
+      return;
+    }
+    const noteCount = allNotes.filter((n) => ids.has(n.folder_id)).length;
+    const subfolderCount = ids.size - 1;
+
+    let mode = "move";
+    if (noteCount || subfolderCount) {
+      const parts = [];
+      if (noteCount) parts.push(`${noteCount} 篇筆記`);
+      if (subfolderCount) parts.push(`${subfolderCount} 個子資料夾`);
+      mode = await askDeleteFolder(`「${folder.name}」裡有 ${parts.join("、")}，要怎麼處理？`);
+      if (!mode) return;
+    } else if (!confirm(`確定要刪除空資料夾「${folder.name}」嗎？`)) {
+      return;
+    }
+
+    const currentInside = state.currentId != null && ids.has(state.currentFolderId);
+    if (currentInside && mode === "delete") {
+      clearTimeout(state.saveTimer);   // 筆記要被刪掉了，不用再儲存
+      state.dirty = false;
+      await state.saving;
+    }
+    try {
+      await api(`/api/folders/${folder.id}?notes=${mode}`, { method: "DELETE" });
+    } catch (err) {
+      toast(`刪除失敗：${err.message}`, "error");
+      return;
+    }
+    if (currentInside && mode === "delete") {
+      state.currentId = null;
+      await loadList();
+      if (state.notes.length) await openNote(state.notes[0].id);
+      else showEmpty();
+    } else {
+      if (currentInside) {
+        // 內容移到上一層後，目前筆記所在位置可能改變
+        const note = await api(`/api/notes/${state.currentId}`).catch(() => null);
+        if (note) state.currentFolderId = note.folder_id;
+      }
+      await loadList();
+    }
+    toast(mode === "delete" ? `已刪除資料夾與 ${noteCount} 篇筆記` : "已刪除資料夾，內容已移到上一層");
+  }
+
+  /** 回傳 "move"、"delete"，取消為 null。 */
+  async function askDeleteFolder(message) {
+    const dialog = $("#delete-folder-dialog");
+    $("#delete-folder-text").textContent = message;
+    const choice = await openDialog(dialog, (finish, signal) => {
+      dialog.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-choice]");
+        if (btn) finish(btn.dataset.choice);
+      }, { signal });
+    });
+    return choice || null;
+  }
+
+  $("#btn-new-folder").addEventListener("click", () => tree.startCreateFolder(null));
+  $("#btn-move-note").addEventListener("click", moveCurrentNote);
+  el.location.addEventListener("click", moveCurrentNote);
 
   // ---------- 開啟 / 新增 / 刪除 ----------
 
@@ -127,7 +366,9 @@
       return;
     }
     state.currentId = note.id;
+    state.currentFolderId = note.folder_id;
     state.dirty = false;
+    tree.expand(note.folder_id);   // 展開筆記所在的資料夾
     el.title.value = note.title;
     el.content.value = note.content;
     el.editor.hidden = false;
@@ -146,11 +387,13 @@
     renderList();
   }
 
-  async function createNote() {
+  /** 新增筆記；folderId 為 null 時建在根目錄。 */
+  async function createNote(folderId = null) {
     if (!(await flushSave())) return;
     try {
-      const note = await api("/api/notes", { method: "POST", json: {} });
+      const note = await api("/api/notes", { method: "POST", json: { folder_id: folderId } });
       el.search.value = "";
+      tree.expand(folderId);
       await loadList();
       await openNote(note.id);
       el.title.focus();
@@ -596,12 +839,23 @@
     downloadFrom("/api/backup");
   });
 
+  // 匯入的目標資料夾：側欄的匯入按鈕是根目錄，資料夾選單的「匯入 .md 到這裡」會先設定它
+  let importFolderId = null;
+  $("#btn-import").addEventListener("click", () => { importFolderId = null; });  // 需在 bindFilePicker 之前註冊
+
+  function importIntoFolder(folder) {
+    importFolderId = folder.id;
+    $("#file-import").click();
+  }
+
   bindFilePicker("#btn-import", "#file-import", async (files) => {
     if (!(await flushSave())) return;
+    const folderId = importFolderId;
     let last = null;
     for (const file of files) {
       const form = new FormData();
       form.append("file", file);
+      if (folderId != null) form.append("folder_id", folderId);
       try {
         last = await api("/api/notes/import", { method: "POST", body: form });
       } catch (err) {
@@ -610,9 +864,11 @@
     }
     if (!last) return;
     el.search.value = "";
+    tree.expand(folderId);
     await loadList();
     await openNote(last.id);
-    toast(files.length > 1 ? `已匯入 ${files.length} 個檔案` : `已匯入「${last.title}」`);
+    const where = `到「${folderLabel(folderId)}」`;
+    toast(files.length > 1 ? `已匯入 ${files.length} 個檔案${where}` : `已匯入「${last.title}」${where}`);
   });
 
   bindFilePicker("#btn-restore", "#file-restore", async ([file]) => {
@@ -708,17 +964,12 @@
 
   // ---------- 事件 ----------
 
-  el.list.addEventListener("click", (e) => {
-    const item = e.target.closest(".note-item");
-    if (item && Number(item.dataset.id) !== state.currentId) openNote(Number(item.dataset.id));
-  });
-
-  $("#btn-new").addEventListener("click", createNote);
-  $("#btn-new-empty").addEventListener("click", createNote);
+  $("#btn-new").addEventListener("click", () => createNote(null));
+  $("#btn-new-empty").addEventListener("click", () => createNote(null));
   $("#btn-delete").addEventListener("click", deleteNote);
 
   el.title.addEventListener("input", () => {
-    const item = el.list.querySelector(`.note-item[data-id="${state.currentId}"] .note-title`);
+    const item = el.tree.querySelector(`.note-row[data-note-id="${state.currentId}"] .tree-name`);
     if (item) item.textContent = el.title.value.trim() || "未命名筆記";
     scheduleSave();
   });

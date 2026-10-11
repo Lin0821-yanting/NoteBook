@@ -301,36 +301,90 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
   background: var(--chrome);
   border-right: 1px solid var(--border);
 }
-.note-list {
+.sidebar-actions { display: grid; gap: 6px; }
+
+/* ---------- 資料夾樹 ---------- */
+
+.tree {
   flex: 1;
-  margin: 0;
-  padding: 0;
+  min-height: 80px;
+  margin: 0 -4px;
+  padding: 0 4px 12px;
   overflow-y: auto;
-  list-style: none;
-}
-.note-item {
-  display: block;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
   border-radius: 8px;
+}
+.tree.drop-root { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+.tree-empty { margin: 12px 6px; color: var(--muted); font-size: .88rem; line-height: 1.6; }
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 3px 4px 3px calc(4px + var(--depth, 0) * 16px);
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tree-row:hover { background: var(--surface-2); }
+.tree-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tree-row.dragging { opacity: .45; }
+.tree-row.drop-target { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+.note-row.active { background: var(--accent-soft); }
+.note-row.active .tree-name { font-weight: 600; }
+
+.twisty {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  color: var(--muted);
+  font-size: .7rem;
+  text-align: center;
+  transition: transform .15s;
+}
+.tree-item[aria-expanded="true"] > .folder-row .twisty { transform: rotate(90deg); }
+.tree-icon { flex: none; font-size: .95rem; }
+.tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-row .tree-name { font-weight: 600; }
+.tree-count, .tree-meta { flex: none; color: var(--muted); font-size: .74rem; white-space: nowrap; }
+.tree-input { flex: 1; min-width: 0; padding: 3px 6px !important; border-color: var(--accent) !important; }
+
+/* 資料夾列的「＋」一直顯示；「⋯」滑鼠移上去才出現（觸控裝置常駐，見下方） */
+.row-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
-  color: var(--text);
+  color: var(--muted);
   font: inherit;
-  text-align: left;
+  font-size: 1rem;
+  line-height: 1;
   cursor: pointer;
 }
-.note-item:hover { background: var(--surface-2); }
-.note-item.active { background: var(--accent-soft); }
-.note-item .note-title {
-  display: block;
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.row-btn:hover { background: var(--border); color: var(--text); }
+.row-btn.more { visibility: hidden; }
+.folder-row:hover .row-btn.more,
+.folder-row:focus-within .row-btn.more,
+.row-btn.more[aria-expanded="true"] { visibility: visible; }
+
+/* 子項目左側的引導線 */
+.tree-children { position: relative; }
+.tree-children::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: calc(10px + var(--depth, 0) * 16px);
+  border-left: 1px solid var(--border);
+  pointer-events: none;
 }
-.note-item .note-meta { color: var(--muted); font-size: .78rem; }
-.list-empty { margin: 12px 4px; color: var(--muted); font-size: .9rem; }
+
 .sidebar-footer {
   display: grid;
   gap: 2px;
@@ -349,7 +403,25 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
 .empty-state .big { display: block; margin-bottom: 8px; font-size: 2.5rem; }
 
 .editor { display: flex; flex: 1; flex-direction: column; min-height: 0; background: var(--surface); }
-.editor-head { display: flex; align-items: center; gap: 12px; padding: 14px 20px 4px; }
+.editor-crumbs { padding: 10px 20px 0; }
+.crumb-btn {
+  max-width: 100%;
+  margin-left: -6px;
+  padding: 2px 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: .82rem;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.crumb-btn:hover { background: var(--surface-2); color: var(--text); }
+.editor-head { display: flex; align-items: center; gap: 12px; padding: 2px 20px 4px; }
 .title-input {
   flex: 1;
   min-width: 0;
@@ -584,7 +656,8 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
   .topnav { gap: 12px; }
   .topnav .user { display: none; }
 
-  .editor-head { flex-wrap: wrap; row-gap: 4px; padding: 10px 12px 4px; }
+  .editor-crumbs { padding: 8px 12px 0; }
+  .editor-head { flex-wrap: wrap; row-gap: 4px; padding: 0 12px 4px; }
   .title-input { flex-basis: 100%; }
   .save-status { flex: 1; }
   .seg [data-view="split"] { display: none; }   /* 手機太窄，只提供編輯 / 預覽 */
@@ -608,7 +681,9 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
 @media (pointer: coarse) {
   .tool, .icon-btn { min-width: 40px; min-height: 40px; }
   .seg button { min-height: 38px; padding: 6px 14px; }
-  .note-item { padding: 12px; }
+  .tree-row { min-height: 42px; }
+  .row-btn { width: 36px; height: 36px; }
+  .row-btn.more { visibility: visible; }
   .btn { min-height: 44px; }
   .menu-list button { padding: 13px 14px; }
   .link-btn { padding: 8px 0; }
@@ -761,3 +836,54 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
   .sk-color { width: 34px; height: 34px; }
   .sketch-bar select { height: 42px; }
 }
+
+/* ---------- 資料夾選單、對話框 ---------- */
+
+.menu-list.floating { position: fixed; top: 0; right: auto; left: 0; z-index: 70; }
+
+.btn.danger-solid { border-color: var(--danger); background: var(--danger); color: #fff; font-weight: 600; }
+.btn.danger-solid:hover { filter: brightness(1.08); background: var(--danger); }
+
+.modal {
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(80dvh, 640px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.modal[open], .modal[open] > form { display: flex; flex-direction: column; min-height: 0; }
+.modal::backdrop { background: var(--backdrop); }
+.modal-head { padding: 16px 20px 8px; font-size: 1.05rem; font-weight: 700; }
+.modal-body { min-height: 0; padding: 4px 20px 12px; overflow-y: auto; }
+.modal-body p { margin: 0 0 8px; }
+.modal-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.picker-list { display: grid; gap: 2px; }
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 10px 6px calc(10px + var(--depth, 0) * 18px);
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.picker-item:hover:not(:disabled) { background: var(--accent-soft); }
+.picker-item:disabled { color: var(--muted); cursor: not-allowed; }
+.picker-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-item .hint { flex: none; color: var(--muted); font-size: .78rem; }
