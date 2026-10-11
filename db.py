@@ -12,9 +12,20 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- 資料夾可以多層：parent_id 為 NULL 表示在根目錄；刪除資料夾時子資料夾一併刪除
+CREATE TABLE IF NOT EXISTS folders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    parent_id  INTEGER REFERENCES folders(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- folder_id 為 NULL 表示筆記在根目錄
 CREATE TABLE IF NOT EXISTS notes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    folder_id  INTEGER REFERENCES folders(id) ON DELETE SET NULL,
     title      TEXT NOT NULL DEFAULT '未命名筆記',
     content    TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
@@ -22,6 +33,12 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(user_id, parent_id);
+"""
+
+# 用到遷移後才有的欄位，必須在 migrate() 之後才能建立
+POST_MIGRATION_SQL = """
+CREATE INDEX IF NOT EXISTS idx_notes_folder ON notes(folder_id);
 """
 
 
@@ -48,6 +65,7 @@ def close_db(exc=None):
 # 舊版資料庫缺少的欄位：(資料表, 欄位, 欄位定義)
 MIGRATIONS = [
     ("users", "theme", "TEXT NOT NULL DEFAULT 'system'"),
+    ("notes", "folder_id", "INTEGER REFERENCES folders(id) ON DELETE SET NULL"),
 ]
 
 
@@ -65,6 +83,7 @@ def init_app(app):
     try:
         conn.executescript(SCHEMA)
         migrate(conn)
+        conn.executescript(POST_MIGRATION_SQL)
     finally:
         conn.close()
     app.teardown_appcontext(close_db)

@@ -34,6 +34,7 @@ MIN_PASSWORD_LEN = 6
 THEMES = ("light", "dark", "system")
 DEFAULT_TITLE = "未命名筆記"
 MAX_TITLE_LEN = 200
+MAX_FOLDER_NAME_LEN = 50
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 IMAGE_MIME = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
 
@@ -230,14 +231,19 @@ def verify_password(password):
 @app.get("/account")
 @login_required
 def account():
-    note_count = get_db().execute(
+    db = get_db()
+    note_count = db.execute(
         "SELECT COUNT(*) FROM notes WHERE user_id = ?", (g.user["id"],)
+    ).fetchone()[0]
+    folder_count = db.execute(
+        "SELECT COUNT(*) FROM folders WHERE user_id = ?", (g.user["id"],)
     ).fetchone()[0]
     folder = UPLOAD_DIR / str(g.user["id"])
     images = [p for p in folder.iterdir() if p.is_file()] if folder.is_dir() else []
     return render_template(
         "account.html",
         note_count=note_count,
+        folder_count=folder_count,
         image_count=len(images),
         image_size=format_size(sum(p.stat().st_size for p in images)),
     )
@@ -302,18 +308,32 @@ def api_error(err):
     return err
 
 
+class ApiError(Exception):
+    """API 輸入錯誤，在任何地方 raise 都會回傳 {error: message}。"""
+
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+
+
+@app.errorhandler(ApiError)
+def handle_api_error(err):
+    return jsonify(error=err.message), err.status
+
+
 def clean_title(title):
     title = str(title or "").strip()[:MAX_TITLE_LEN]
     return title or DEFAULT_TITLE
 
 
-def insert_note(user_id, title, content, created_at=None, updated_at=None):
+def insert_note(user_id, title, content, created_at=None, updated_at=None, folder_id=None):
     db = get_db()
     cur = db.execute(
-        "INSERT INTO notes (user_id, title, content, created_at, updated_at) "
-        "VALUES (?, ?, ?, COALESCE(?, datetime('now', 'localtime')), "
+        "INSERT INTO notes (user_id, folder_id, title, content, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, COALESCE(?, datetime('now', 'localtime')), "
         "COALESCE(?, datetime('now', 'localtime')))",
-        (user_id, clean_title(title), content or "", created_at, updated_at),
+        (user_id, folder_id, clean_title(title), content or "", created_at, updated_at),
     )
     db.commit()
     return cur.lastrowid
@@ -331,7 +351,7 @@ def note_or_404(note_id):
 @app.get("/api/notes")
 @login_required
 def list_notes():
-    sql = "SELECT id, title, updated_at FROM notes WHERE user_id = ?"
+    sql = "SELECT id, folder_id, title, updated_at FROM notes WHERE user_id = ?"
     params = [g.user["id"]]
     keyword = request.args.get("q", "").strip()
     if keyword:
@@ -346,7 +366,8 @@ def list_notes():
 @login_required
 def create_note():
     data = request.get_json(silent=True) or {}
-    note_id = insert_note(g.user["id"], data.get("title"), data.get("content"))
+    note_id = insert_note(g.user["id"], data.get("title"), data.get("content"),
+                          folder_id=parse_folder_ref(data.get("folder_id")))
     return jsonify(dict(note_or_404(note_id))), 201
 
 
@@ -359,18 +380,24 @@ def get_note(note_id):
 @app.put("/api/notes/<int:note_id>")
 @login_required
 def update_note(note_id):
+    """儲存標題 / 內容，或用 folder_id 搬到其他資料夾（null＝根目錄）。"""
     note = note_or_404(note_id)
     data = request.get_json(silent=True) or {}
-    content = data.get("content", note["content"])
-    if not isinstance(content, str):
-        return jsonify(error="內容格式錯誤"), 400
-    db = get_db()
-    db.execute(
-        "UPDATE notes SET title = ?, content = ?, updated_at = datetime('now', 'localtime') "
-        "WHERE id = ?",
-        (clean_title(data.get("title", note["title"])), content, note_id),
-    )
-    db.commit()
+    fields, params = [], []
+    if "folder_id" in data:
+        fields.append("folder_id = ?")
+        params.append(parse_folder_ref(data["folder_id"]))
+    if "title" in data or "content" in data:
+        content = data.get("content", note["content"])
+        if not isinstance(content, str):
+            raise ApiError("內容格式錯誤")
+        # 只有內容改變才更新修改時間；單純搬移資料夾不算修改（和檔案總管一樣）
+        fields += ["title = ?", "content = ?", "updated_at = datetime('now', 'localtime')"]
+        params += [clean_title(data.get("title", note["title"])), content]
+    if fields:
+        db = get_db()
+        db.execute(f"UPDATE notes SET {', '.join(fields)} WHERE id = ?", (*params, note_id))
+        db.commit()
     return jsonify(dict(note_or_404(note_id)))
 
 
@@ -382,6 +409,171 @@ def delete_note(note_id):
     db.execute("DELETE FROM notes WHERE id = ?", (note_id,))
     db.commit()
     return "", 204
+
+
+# ---------------------------------------------------------------------------
+# 資料夾 API：可以多層，parent_id 為 None 表示根目錄
+# ---------------------------------------------------------------------------
+
+def folder_json(row):
+    return {"id": row["id"], "name": row["name"], "parent_id": row["parent_id"],
+            "created_at": row["created_at"]}
+
+
+def folder_or_404(folder_id):
+    folder = get_db().execute(
+        "SELECT * FROM folders WHERE id = ? AND user_id = ?", (folder_id, g.user["id"])
+    ).fetchone()
+    if folder is None:
+        abort(404)
+    return folder
+
+
+def parse_folder_ref(value):
+    """API 傳入的 folder_id / parent_id：空值表示根目錄，否則必須是自己的資料夾。"""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ApiError("資料夾參數格式錯誤")
+    try:
+        folder_id = int(value)
+    except (TypeError, ValueError):
+        raise ApiError("資料夾參數格式錯誤") from None
+    folder_or_404(folder_id)
+    return folder_id
+
+
+def clean_folder_name(name):
+    name = str(name or "").strip()
+    if not name:
+        raise ApiError("請輸入資料夾名稱")
+    if len(name) > MAX_FOLDER_NAME_LEN:
+        raise ApiError(f"資料夾名稱最多 {MAX_FOLDER_NAME_LEN} 個字")
+    if re.search(r"[\\/]", name):
+        raise ApiError("資料夾名稱不能包含 / 或 \\")
+    return name
+
+
+def descendant_ids(folder_id):
+    """資料夾本身與所有子孫資料夾的 id。"""
+    rows = get_db().execute(
+        """WITH RECURSIVE tree(id) AS (
+               SELECT id FROM folders WHERE id = ?
+               UNION ALL
+               SELECT f.id FROM folders f JOIN tree ON f.parent_id = tree.id
+           )
+           SELECT id FROM tree""",
+        (folder_id,),
+    )
+    return [row["id"] for row in rows]
+
+
+def name_taken(user_id, parent_id, name, exclude_id=None):
+    """同一層是否已有同名資料夾（不分大小寫）。"""
+    row = get_db().execute(
+        "SELECT 1 FROM folders WHERE user_id = ? AND parent_id IS ? "
+        "AND name = ? COLLATE NOCASE AND id IS NOT ?",
+        (user_id, parent_id, name, exclude_id),
+    ).fetchone()
+    return row is not None
+
+
+def unique_name(user_id, parent_id, name, exclude_id=None):
+    """同名時自動加上 (2)、(3)…，用在刪除後搬上一層與還原備份。"""
+    candidate, n = name, 2
+    while name_taken(user_id, parent_id, candidate, exclude_id):
+        candidate = f"{name} ({n})"
+        n += 1
+    return candidate
+
+
+def insert_folder(user_id, parent_id, name):
+    cur = get_db().execute(
+        "INSERT INTO folders (user_id, parent_id, name) VALUES (?, ?, ?)",
+        (user_id, parent_id, name),
+    )
+    return cur.lastrowid
+
+
+@app.get("/api/folders")
+@login_required
+def list_folders():
+    rows = get_db().execute(
+        "SELECT * FROM folders WHERE user_id = ? ORDER BY id", (g.user["id"],)
+    )
+    return jsonify([folder_json(row) for row in rows])
+
+
+@app.post("/api/folders")
+@login_required
+def create_folder():
+    data = request.get_json(silent=True) or {}
+    name = clean_folder_name(data.get("name"))
+    parent_id = parse_folder_ref(data.get("parent_id"))
+    if name_taken(g.user["id"], parent_id, name):
+        raise ApiError("這裡已經有同名的資料夾", 409)
+    folder_id = insert_folder(g.user["id"], parent_id, name)
+    get_db().commit()
+    return jsonify(folder_json(folder_or_404(folder_id))), 201
+
+
+@app.put("/api/folders/<int:folder_id>")
+@login_required
+def update_folder(folder_id):
+    """改名，或用 parent_id 搬到其他資料夾底下（null＝根目錄）。"""
+    folder = folder_or_404(folder_id)
+    data = request.get_json(silent=True) or {}
+    name = clean_folder_name(data["name"]) if "name" in data else folder["name"]
+    parent_id = folder["parent_id"]
+    if "parent_id" in data:
+        parent_id = parse_folder_ref(data["parent_id"])
+        if parent_id is not None and parent_id in descendant_ids(folder_id):
+            raise ApiError("不能把資料夾移到自己或自己的子資料夾裡")
+    if name_taken(g.user["id"], parent_id, name, exclude_id=folder_id):
+        raise ApiError("這裡已經有同名的資料夾", 409)
+    db = get_db()
+    db.execute("UPDATE folders SET name = ?, parent_id = ? WHERE id = ?",
+               (name, parent_id, folder_id))
+    db.commit()
+    return jsonify(folder_json(folder_or_404(folder_id)))
+
+
+@app.delete("/api/folders/<int:folder_id>")
+@login_required
+def delete_folder(folder_id):
+    """notes=delete：連同所有子資料夾裡的筆記一起刪除；
+    notes=move：裡面的筆記與子資料夾搬到上一層，只刪除資料夾本身。"""
+    folder = folder_or_404(folder_id)
+    mode = request.args.get("notes", "move")
+    if mode not in ("move", "delete"):
+        raise ApiError("notes 參數只能是 move 或 delete")
+    user_id = g.user["id"]
+    db = get_db()
+    deleted = moved = 0
+    if mode == "delete":
+        ids = descendant_ids(folder_id)
+        marks = ",".join("?" * len(ids))
+        deleted = db.execute(
+            f"DELETE FROM notes WHERE user_id = ? AND folder_id IN ({marks})", (user_id, *ids)
+        ).rowcount
+    else:
+        parent_id = folder["parent_id"]
+        # 先把要刪的資料夾改成空名稱，子資料夾搬上去時才不會跟它撞名
+        db.execute("UPDATE folders SET name = '' WHERE id = ?", (folder_id,))
+        moved = db.execute(
+            "UPDATE notes SET folder_id = ? WHERE folder_id = ?", (parent_id, folder_id)
+        ).rowcount
+        children = db.execute(
+            "SELECT id, name FROM folders WHERE parent_id = ?", (folder_id,)
+        ).fetchall()
+        for child in children:
+            db.execute(
+                "UPDATE folders SET parent_id = ?, name = ? WHERE id = ?",
+                (parent_id, unique_name(user_id, parent_id, child["name"], child["id"]), child["id"]),
+            )
+    db.execute("DELETE FROM folders WHERE id = ?", (folder_id,))  # 子資料夾 CASCADE
+    db.commit()
+    return jsonify(deleted_notes=deleted, moved_notes=moved)
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +674,7 @@ def export_note(note_id):
 @app.post("/api/notes/import")
 @login_required
 def import_note():
+    folder_id = parse_folder_ref(request.form.get("folder_id"))  # 空值＝根目錄
     file = request.files.get("file")
     if file is None or not file.filename.lower().endswith((".md", ".markdown", ".txt")):
         return jsonify(error="請選擇 .md 檔案"), 400
@@ -493,7 +686,8 @@ def import_note():
     first_line = content.lstrip("\n").split("\n", 1)[0]
     heading = re.match(r"#\s+(.+)", first_line)
     title = heading.group(1).strip() if heading else Path(file.filename).stem
-    note_id = insert_note(g.user["id"], title, extract_data_images(content, g.user["id"]))
+    note_id = insert_note(g.user["id"], title, extract_data_images(content, g.user["id"]),
+                          folder_id=folder_id)
     return jsonify(dict(note_or_404(note_id))), 201
 
 
@@ -501,15 +695,21 @@ def import_note():
 @login_required
 def backup():
     user_id = g.user["id"]
-    rows = get_db().execute(
-        "SELECT title, content, created_at, updated_at FROM notes WHERE user_id = ? ORDER BY id",
+    db = get_db()
+    folders = db.execute(
+        "SELECT id, name, parent_id FROM folders WHERE user_id = ? ORDER BY id", (user_id,)
+    )
+    notes = db.execute(
+        "SELECT folder_id, title, content, created_at, updated_at FROM notes "
+        "WHERE user_id = ? ORDER BY id",
         (user_id,),
     )
     payload = {
         "app": "markdown-notebook",
-        "version": 1,
+        "version": 2,  # v2 起包含資料夾結構
         "exported_at": datetime.now().isoformat(timespec="seconds"),
-        "notes": [{**dict(row), "content": inline_images(row["content"], user_id)} for row in rows],
+        "folders": [dict(row) for row in folders],
+        "notes": [{**dict(row), "content": inline_images(row["content"], user_id)} for row in notes],
     }
     data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     return download(data, f"notebook-backup-{date.today():%Y%m%d}.json", "application/json")
@@ -518,11 +718,14 @@ def backup():
 @app.post("/api/restore")
 @login_required
 def restore():
-    """把備份檔中的筆記「新增」到目前帳號，不會覆蓋既有筆記。"""
+    """把備份檔中的資料夾與筆記「新增」到目前帳號，不會覆蓋既有資料。
+    v1 備份沒有資料夾，筆記全部放在根目錄。"""
     file = request.files.get("file")
     try:
-        notes = json.loads(file.read().decode("utf-8-sig"))["notes"]
-        if not isinstance(notes, list):
+        payload = json.loads(file.read().decode("utf-8-sig"))
+        notes = payload["notes"]
+        folders = payload.get("folders") or []
+        if not isinstance(notes, list) or not isinstance(folders, list):
             raise ValueError
     except (AttributeError, KeyError, TypeError, ValueError):
         return jsonify(error="不是有效的備份檔"), 400
@@ -531,15 +734,46 @@ def restore():
         return value if isinstance(value, str) and TIMESTAMP_RE.fullmatch(value) else None
 
     user_id = g.user["id"]
+    id_map = restore_folders(user_id, folders)
     imported = 0
     for note in notes:
         if not isinstance(note, dict) or not isinstance(note.get("content", ""), str):
             continue
+        old_folder = note.get("folder_id")
         insert_note(user_id, note.get("title"),
                     extract_data_images(note.get("content", ""), user_id),
-                    timestamp(note.get("created_at")), timestamp(note.get("updated_at")))
+                    timestamp(note.get("created_at")), timestamp(note.get("updated_at")),
+                    folder_id=id_map.get(old_folder) if isinstance(old_folder, int) else None)
         imported += 1
-    return jsonify(imported=imported)
+    return jsonify(imported=imported, folders=len(id_map))
+
+
+def restore_folders(user_id, folders):
+    """依父子順序重建資料夾，回傳 {備份中的 id: 新 id}。
+    父資料夾不存在（或資料有循環）時放到根目錄；同名時自動加 (2)。"""
+    pending = [f for f in folders if isinstance(f, dict) and isinstance(f.get("id"), int)]
+    id_map = {}
+
+    def parent_ready(folder):
+        parent = folder.get("parent_id")
+        return parent is None or (isinstance(parent, int) and parent in id_map)
+
+    while pending:
+        ready = [f for f in pending if parent_ready(f)]
+        if not ready:
+            ready = [pending[0]]  # 卡住了：父資料夾缺失，放到根目錄
+        for folder in ready:
+            pending.remove(folder)
+            parent = folder.get("parent_id")
+            parent_id = id_map.get(parent) if isinstance(parent, int) else None
+            try:
+                name = clean_folder_name(folder.get("name"))
+            except ApiError:
+                name = "未命名資料夾"
+            id_map[folder["id"]] = insert_folder(user_id, parent_id,
+                                                 unique_name(user_id, parent_id, name))
+    get_db().commit()
+    return id_map
 
 
 def lan_ip():
