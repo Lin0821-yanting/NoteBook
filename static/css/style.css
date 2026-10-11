@@ -2,47 +2,88 @@
    Markdown 筆記本 — 樣式
    ========================================================================== */
 
+/* 主題：<html data-theme="light | dark | system">，配色參考 VS Code Light / Dark Modern。
+   深色變數在「深色」與「跟隨系統＋系統為深色」兩處各寫一次（純 CSS 無法共用區塊）。 */
+
 :root {
-  color-scheme: light dark;
-  --bg: #f5f6f8;
-  --surface: #ffffff;
-  --surface-2: #f0f2f5;
-  --border: #e2e5ea;
-  --text: #1f2328;
-  --muted: #6b7280;
-  --accent: #3b5bdb;
-  --accent-hover: #2f4ac0;
-  --accent-soft: #e7ecff;
-  --danger: #d9363e;
-  --danger-soft: #ffe9ea;
-  --success: #2b8a3e;
-  --success-soft: #e5f6e9;
-  --code-bg: #f2f3f5;
-  --shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 6px 20px rgba(15, 23, 42, .07);
+  color-scheme: light;
+  --bg: #f8f8f8;          /* 頁面底色 */
+  --chrome: #f8f8f8;      /* 頂列、側欄（相當於 VS Code 的側邊欄） */
+  --surface: #ffffff;     /* 編輯區、卡片 */
+  --surface-2: #f0f0f0;   /* hover、次要底色 */
+  --border: #e5e5e5;
+  --text: #3b3b3b;
+  --muted: #6e6e6e;
+  --link: #005fb8;
+  --accent: #005fb8;
+  --accent-hover: #0258a8;
+  --accent-soft: #e1edf9;
+  --danger: #c4314b;
+  --danger-soft: #fdecee;
+  --success: #2a7d3a;
+  --success-soft: #e5f4e8;
+  --code-bg: #f3f3f3;
+  --backdrop: rgba(0, 0, 0, .35);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 6px 20px rgba(0, 0, 0, .08);
   --radius: 10px;
   --topbar-h: 52px;
   --font: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
   --mono: ui-monospace, "Cascadia Code", Consolas, "Noto Sans Mono CJK TC", monospace;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #181818;
+  --chrome: #181818;
+  --surface: #1f1f1f;
+  --surface-2: #2a2d2e;
+  --border: #353535;
+  --text: #cccccc;
+  --muted: #9d9d9d;
+  --link: #4daafc;
+  --accent: #0078d4;
+  --accent-hover: #026ec1;
+  --accent-soft: #04395e;
+  --danger: #f85149;
+  --danger-soft: #3d1d1f;
+  --success: #73c991;
+  --success-soft: #1d3324;
+  --code-bg: #2b2b2b;
+  --backdrop: rgba(0, 0, 0, .55);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .45);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #131519;
-    --surface: #1b1e23;
-    --surface-2: #24282f;
-    --border: #2f343c;
-    --text: #e6e8eb;
-    --muted: #9aa3ad;
-    --accent: #7090ff;
-    --accent-hover: #8ea7ff;
-    --accent-soft: #232d4d;
-    --danger: #ff6b6f;
-    --danger-soft: #3a1e21;
-    --success: #5fcf75;
-    --success-soft: #1c3223;
-    --code-bg: #24282f;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .35);
+  :root[data-theme="system"] {
+    color-scheme: dark;
+    --bg: #181818;
+    --chrome: #181818;
+    --surface: #1f1f1f;
+    --surface-2: #2a2d2e;
+    --border: #353535;
+    --text: #cccccc;
+    --muted: #9d9d9d;
+    --link: #4daafc;
+    --accent: #0078d4;
+    --accent-hover: #026ec1;
+    --accent-soft: #04395e;
+    --danger: #f85149;
+    --danger-soft: #3d1d1f;
+    --success: #73c991;
+    --success-soft: #1d3324;
+    --code-bg: #2b2b2b;
+    --backdrop: rgba(0, 0, 0, .55);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .45);
   }
+}
+
+/* 頂列的主題按鈕：淺色時顯示 🌙（切到深色），深色時顯示 ☀️ */
+.theme-icon-light { display: none; }
+:root[data-theme="dark"] .theme-icon-light { display: inline; }
+:root[data-theme="dark"] .theme-icon-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] .theme-icon-light { display: inline; }
+  :root[data-theme="system"] .theme-icon-dark { display: none; }
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -57,7 +98,7 @@ body {
   line-height: 1.5;
 }
 
-a { color: var(--accent); }
+a { color: var(--link); }
 
 [hidden] { display: none !important; }
 
@@ -179,7 +220,7 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
   height: var(--topbar-h);
   flex: none;
   padding: 0 16px;
-  background: var(--surface);
+  background: var(--chrome);
   border-bottom: 1px solid var(--border);
 }
 .brand {
@@ -259,7 +300,7 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
   width: 280px;
   flex: none;
   padding: 12px;
-  background: var(--surface);
+  background: var(--chrome);
   border-right: 1px solid var(--border);
 }
 .note-list {
@@ -362,7 +403,7 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
   cursor: pointer;
 }
 .seg button + button { border-left: 1px solid var(--border); }
-.seg button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.seg button.active { background: var(--accent-soft); color: var(--link); font-weight: 600; }
 
 .panes { display: grid; flex: 1; grid-template-columns: 1fr 1fr; min-height: 0; }
 .panes.view-edit { grid-template-columns: 1fr; }
@@ -443,6 +484,24 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
 .info { display: grid; grid-template-columns: 110px 1fr; gap: 8px 16px; margin: 0; }
 .info dt { color: var(--muted); }
 .info dd { margin: 0; font-weight: 600; }
+
+.theme-options { display: flex; flex-wrap: wrap; gap: 10px; }
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 14px 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.theme-option:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.theme-option input { margin: 0; accent-color: var(--accent); }
+.swatch { width: 26px; height: 18px; border: 1px solid #8884; border-radius: 4px; }
+.swatch-light { background: #ffffff; }
+.swatch-dark { background: #1f1f1f; }
+.swatch-system { background: linear-gradient(135deg, #ffffff 50%, #1f1f1f 50%); }
 
 /* ---------- 窄螢幕 ---------- */
 

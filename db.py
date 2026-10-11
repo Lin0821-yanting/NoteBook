@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL,
+    theme         TEXT NOT NULL DEFAULT 'system',
     created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -44,11 +45,26 @@ def close_db(exc=None):
         db.close()
 
 
+# 舊版資料庫缺少的欄位：(資料表, 欄位, 欄位定義)
+MIGRATIONS = [
+    ("users", "theme", "TEXT NOT NULL DEFAULT 'system'"),
+]
+
+
+def migrate(conn):
+    for table, column, definition in MIGRATIONS:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    conn.commit()
+
+
 def init_app(app):
-    """建立資料表（若不存在）並註冊請求結束時的關閉動作。"""
+    """建立資料表（若不存在）、補上舊版缺少的欄位，並註冊請求結束時的關閉動作。"""
     conn = connect(app.config["DATABASE"])
     try:
         conn.executescript(SCHEMA)
+        migrate(conn)
     finally:
         conn.close()
     app.teardown_appcontext(close_db)

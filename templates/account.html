@@ -23,6 +23,25 @@
   </section>
 
   <section class="card">
+    <h2>外觀</h2>
+    <p class="muted">背景顏色會儲存在帳號中，電腦、手機、平板登入後都會套用。</p>
+    <div class="theme-options" role="radiogroup" aria-label="背景顏色">
+      <label class="theme-option">
+        <input type="radio" name="theme" value="light">
+        <span class="swatch swatch-light" aria-hidden="true"></span>淺色
+      </label>
+      <label class="theme-option">
+        <input type="radio" name="theme" value="dark">
+        <span class="swatch swatch-dark" aria-hidden="true"></span>深色
+      </label>
+      <label class="theme-option">
+        <input type="radio" name="theme" value="system">
+        <span class="swatch swatch-system" aria-hidden="true"></span>跟隨系統
+      </label>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>變更密碼</h2>
     <form method="post" action="{{ url_for('change_password') }}" class="form">
       <label>目前密碼

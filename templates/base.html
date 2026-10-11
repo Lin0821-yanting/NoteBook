@@ -1,11 +1,15 @@
 <!doctype html>
-<html lang="zh-Hant">
+{# 主題由伺服器直接輸出（帳號同步），載入時不會先閃一下白色 #}
+<html lang="zh-Hant" data-theme="{{ g.user.theme if g.user else 'system' }}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}Markdown 筆記本{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📒</text></svg>">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% if g.user %}
+  <script src="{{ url_for('static', filename='js/theme.js') }}" defer></script>
+  {% endif %}
   {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">

@@ -1,10 +1,13 @@
 <header class="topbar">
   {% if sidebar_toggle %}
-  <button type="button" class="icon-btn only-mobile" id="btn-sidebar" aria-label="切換筆記清單">☰</button>
+  <button type="button" class="icon-btn" id="btn-sidebar" aria-label="顯示 / 隱藏筆記清單" title="筆記清單">☰</button>
   {% endif %}
-  <a class="brand" href="{{ url_for('notes_page') }}"><span class="brand-icon">📒</span>Markdown 筆記本</a>
+  <a class="brand" href="{{ url_for('notes_page') }}"><span class="brand-icon">📒</span><span class="brand-text">Markdown 筆記本</span></a>
   <nav class="topnav">
     <span class="user" title="目前登入的帳號">👤 {{ g.user.username }}</span>
+    <button type="button" class="icon-btn" id="btn-theme" aria-label="切換深色 / 淺色背景" title="切換深色 / 淺色背景">
+      <span class="theme-icon-light">☀️</span><span class="theme-icon-dark">🌙</span>
+    </button>
     <a href="{{ url_for('account') }}">帳號管理</a>
     <form method="post" action="{{ url_for('logout') }}">
       <button type="submit" class="link-btn">登出</button>

@@ -31,6 +31,7 @@ UPLOAD_DIR = BASE_DIR / "uploads"
 
 USERNAME_RE = re.compile(r"^\w{3,20}$")  # 中英文、數字、底線，3–20 字
 MIN_PASSWORD_LEN = 6
+THEMES = ("light", "dark", "system")
 DEFAULT_TITLE = "未命名筆記"
 MAX_TITLE_LEN = 200
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -105,7 +106,7 @@ def load_current_user():
     g.user = None
     if user_id is not None:
         g.user = get_db().execute(
-            "SELECT id, username, created_at FROM users WHERE id = ?", (user_id,)
+            "SELECT id, username, theme, created_at FROM users WHERE id = ?", (user_id,)
         ).fetchone()
 
 
@@ -271,6 +272,19 @@ def delete_account():
     session.clear()
     flash("帳號與所有筆記已刪除", "success")
     return redirect(url_for("login"))
+
+
+@app.put("/api/settings")
+@login_required
+def update_settings():
+    """帳號偏好設定（目前只有主題），存在資料庫，所有裝置同步。"""
+    theme = (request.get_json(silent=True) or {}).get("theme")
+    if theme not in THEMES:
+        return jsonify(error="主題只能是 light、dark 或 system"), 400
+    db = get_db()
+    db.execute("UPDATE users SET theme = ? WHERE id = ?", (theme, g.user["id"]))
+    db.commit()
+    return jsonify(theme=theme)
 
 
 # ---------------------------------------------------------------------------
