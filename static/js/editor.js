@@ -560,16 +560,73 @@
     }
   });
 
-  // ---------- 檢視模式 ----------
+  // ---------- 檢視模式與螢幕尺寸 ----------
 
-  function setView(mode) {
-    if (!VIEW_MODES.includes(mode)) mode = "split";
+  // 與 style.css 的斷點一致：≥1024 電腦、<768 手機
+  const desktopQuery = window.matchMedia("(min-width: 1024px)");
+  const phoneQuery = window.matchMedia("(max-width: 767px)");
+  let preferredView = "split";
+
+  /** 手機太窄不提供分割，偏好是分割時改用編輯；轉回寬螢幕會恢復分割。 */
+  function applyView() {
+    const mode = phoneQuery.matches && preferredView === "split" ? "edit" : preferredView;
     el.panes.className = `panes view-${mode}`;
     document.querySelectorAll("#view-mode button").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.view === mode);
     });
-    storage.set("viewMode", mode);
   }
+
+  function setView(mode) {
+    preferredView = VIEW_MODES.includes(mode) ? mode : "split";
+    storage.set("viewMode", preferredView);
+    applyView();
+  }
+
+  phoneQuery.addEventListener("change", applyView);
+
+  // ---------- 側欄：電腦上收合，平板 / 手機上是抽屜 ----------
+
+  function closeDrawer() {
+    el.app.classList.remove("sidebar-open");
+  }
+
+  $("#btn-sidebar")?.addEventListener("click", () => {
+    if (desktopQuery.matches) {
+      const collapsed = el.app.classList.toggle("sidebar-collapsed");
+      storage.set("sidebarCollapsed", collapsed ? "1" : "");
+    } else {
+      el.app.classList.toggle("sidebar-open");
+    }
+  });
+  $("#backdrop").addEventListener("click", closeDrawer);
+  desktopQuery.addEventListener("change", closeDrawer);
+
+  // ---------- ⋯ 更多動作選單 ----------
+
+  const menuButton = $("#btn-menu");
+  const menuList = $("#note-menu .menu-list");
+
+  function closeMenu() {
+    menuList.hidden = true;
+    menuButton.setAttribute("aria-expanded", "false");
+  }
+
+  menuButton.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const opening = menuList.hidden;
+    menuList.hidden = !opening;
+    menuButton.setAttribute("aria-expanded", String(opening));
+  });
+  menuList.addEventListener("click", closeMenu);  // 點了選項就收起
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#note-menu")) closeMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeMenu();
+      closeDrawer();
+    }
+  });
 
   // 分割模式下，預覽跟著編輯區等比例捲動
   el.content.addEventListener("scroll", () => {
@@ -587,6 +644,7 @@
   });
 
   $("#btn-new").addEventListener("click", createNote);
+  $("#btn-new-empty").addEventListener("click", createNote);
   $("#btn-delete").addEventListener("click", deleteNote);
 
   el.title.addEventListener("input", () => {
@@ -634,9 +692,6 @@
     }
   });
 
-  $("#btn-sidebar")?.addEventListener("click", () => el.app.classList.toggle("sidebar-open"));
-  $(".editor-area").addEventListener("click", () => el.app.classList.remove("sidebar-open"));
-
   window.addEventListener("beforeunload", (e) => {
     if (state.dirty) {
       save();
@@ -660,6 +715,7 @@
 
   (async function init() {
     setView(storage.get("viewMode"));
+    if (storage.get("sidebarCollapsed")) el.app.classList.add("sidebar-collapsed");
     try {
       await loadList();
     } catch (err) {

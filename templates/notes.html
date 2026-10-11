@@ -23,21 +23,37 @@
       <button type="button" class="btn ghost" id="btn-import" title="上傳 .md 檔建立新筆記">⬆ 匯入 .md 檔</button>
       <button type="button" class="btn ghost" id="btn-backup" title="下載全部筆記（含圖片）為 JSON">💾 備份全部筆記</button>
       <button type="button" class="btn ghost" id="btn-restore" title="從備份 JSON 還原筆記">♻ 從備份還原</button>
-      <input type="file" id="file-import" accept=".md,.markdown,.txt,text/markdown" multiple hidden>
+      {# 不限制 accept：iOS 不認得 .md 類型會把檔案反灰；副檔名由後端檢查 #}
+      <input type="file" id="file-import" multiple hidden>
       <input type="file" id="file-restore" accept=".json,application/json" hidden>
     </div>
   </aside>
+  <div class="backdrop" id="backdrop" aria-hidden="true"></div>
 
   <main class="editor-area">
     <div class="empty-state" id="empty-state">
       <span class="big">📝</span>
-      選擇左側筆記，或按「＋ 新增筆記」開始寫作
+      <p>從 ☰ 筆記清單選擇一篇筆記，或建立新的筆記開始寫作</p>
+      <button type="button" class="btn primary" id="btn-new-empty">＋ 新增筆記</button>
     </div>
 
     <section class="editor" id="editor" hidden>
       <div class="editor-head">
         <input id="title" class="title-input" maxlength="200" placeholder="筆記標題" aria-label="筆記標題">
         <span class="save-status" id="save-status" aria-live="polite"></span>
+        <div class="seg" id="view-mode" role="group" aria-label="檢視模式">
+          <button type="button" data-view="edit">編輯</button>
+          <button type="button" data-view="split">分割</button>
+          <button type="button" data-view="preview">預覽</button>
+        </div>
+        <div class="menu" id="note-menu">
+          <button type="button" class="icon-btn" id="btn-menu" title="更多動作" aria-label="更多動作"
+                  aria-haspopup="menu" aria-expanded="false">⋯</button>
+          <div class="menu-list" role="menu" hidden>
+            <button type="button" role="menuitem" id="btn-export">⬇ 下載 .md（含圖片）</button>
+            <button type="button" role="menuitem" class="danger" id="btn-delete">🗑 刪除這篇筆記</button>
+          </div>
+        </div>
       </div>
 
       <div class="toolbar" role="toolbar" aria-label="Markdown 工具列">
@@ -51,15 +67,8 @@
         <button type="button" class="tool" data-md="quote" title="引言">❝ 引言</button>
         <button type="button" class="tool" data-md="code" title="程式碼">&lt;/&gt;</button>
         <button type="button" class="tool" data-md="link" title="連結">🔗 連結</button>
-        <button type="button" class="tool" id="btn-image" title="插入圖片（也可直接貼上或拖放）">🖼 圖片</button>
-        <span class="spacer"></span>
-        <div class="seg" id="view-mode" role="group" aria-label="檢視模式">
-          <button type="button" data-view="edit">編輯</button>
-          <button type="button" data-view="split">分割</button>
-          <button type="button" data-view="preview">預覽</button>
-        </div>
-        <button type="button" class="btn" id="btn-export" title="下載為 .md（圖片會內嵌在檔案中）">⬇ 下載 .md</button>
-        <button type="button" class="btn danger" id="btn-delete" title="刪除這篇筆記">🗑 刪除</button>
+        <span class="sep"></span>
+        <button type="button" class="tool" id="btn-image" title="插入圖片（電腦可直接貼上或拖放；手機可選相簿或拍照）">🖼 圖片</button>
       </div>
 
       <div class="panes view-split" id="panes">

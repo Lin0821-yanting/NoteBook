@@ -244,8 +244,6 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
 .topnav form { margin: 0; }
 .topnav .user { font-weight: 600; }
 
-.only-mobile { display: none; }
-
 /* ---------- 登入 / 註冊 ---------- */
 
 .auth-page {
@@ -388,10 +386,8 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
 }
 .tool:hover { background: var(--surface-2); border-color: var(--border); }
 .toolbar .sep { width: 1px; height: 20px; margin: 0 6px; background: var(--border); }
-.toolbar .spacer { flex: 1; }
-.toolbar .btn { padding: 5px 10px; font-size: .85rem; }
 
-.seg { display: inline-flex; margin-right: 6px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg { display: inline-flex; flex: none; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .seg button {
   padding: 5px 10px;
   white-space: nowrap;
@@ -503,32 +499,117 @@ input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visib
 .swatch-dark { background: #1f1f1f; }
 .swatch-system { background: linear-gradient(135deg, #ffffff 50%, #1f1f1f 50%); }
 
-/* ---------- 窄螢幕 ---------- */
+/* ---------- ⋯ 更多動作選單、抽屜遮罩 ---------- */
 
-@media (max-width: 760px) {
-  .only-mobile { display: inline-flex; }
-  .topnav { gap: 12px; }
-  .topnav .user { display: none; }
+.menu { position: relative; flex: none; }
+.menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  display: grid;
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.menu-list button {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: .9rem;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.menu-list button:hover { background: var(--surface-2); }
+.menu-list button.danger { color: var(--danger); }
 
+.backdrop { display: none; }
+
+/* 瀏海 / 圓角螢幕的安全區域 */
+.topbar {
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+}
+.sidebar { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.toast { bottom: calc(20px + env(safe-area-inset-bottom)); }
+
+/* ---------- 電腦（≥1024px）：側欄常駐，☰ 可收合 ---------- */
+
+@media (min-width: 1024px) {
+  .app.sidebar-collapsed .sidebar { display: none; }
+}
+
+/* ---------- 平板與手機（<1024px）：側欄改為抽屜 ---------- */
+
+@media (max-width: 1023px) {
   .sidebar {
     position: fixed;
     top: var(--topbar-h);
     bottom: 0;
     left: 0;
     z-index: 40;
-    width: min(85vw, 300px);
+    width: min(85vw, 320px);
     box-shadow: var(--shadow);
     transform: translateX(-105%);
-    transition: transform .2s ease;
+    visibility: hidden;
+    transition: transform .2s ease, visibility .2s;
   }
-  .app.sidebar-open .sidebar { transform: none; }
+  .app.sidebar-open .sidebar { transform: none; visibility: visible; }
+  .app.sidebar-open .backdrop {
+    display: block;
+    position: fixed;
+    inset: var(--topbar-h) 0 0 0;
+    z-index: 30;
+    background: var(--backdrop);
+  }
 
-  .editor-head { padding: 12px 16px 2px; }
-  .toolbar { flex-wrap: nowrap; padding: 6px 12px 8px; overflow-x: auto; }
+  .toolbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+
+  /* 16px 以上 iOS 聚焦輸入框時才不會自動放大畫面 */
+  #content, input[type="text"], input[type="password"], input[type="search"], input:not([type]) {
+    font-size: 16px;
+  }
+}
+
+/* ---------- 手機（<768px） ---------- */
+
+@media (max-width: 767px) {
+  .topnav { gap: 12px; }
+  .topnav .user { display: none; }
+
+  .editor-head { flex-wrap: wrap; row-gap: 4px; padding: 10px 12px 4px; }
+  .title-input { flex-basis: 100%; }
+  .save-status { flex: 1; }
+  .seg [data-view="split"] { display: none; }   /* 手機太窄，只提供編輯 / 預覽 */
   .panes.view-split { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
   .panes.view-split #content { border-right: 0; border-bottom: 1px solid var(--border); }
+  .toolbar { padding: 6px 8px 8px; }
   #content { padding: 14px 16px; }
   #preview { padding: 14px 16px 32px; }
+
+  .account h1 { font-size: 1.35rem; }
   .card { padding: 16px; }
   .info { grid-template-columns: 90px 1fr; }
+}
+
+@media (max-width: 400px) {
+  .brand-text { display: none; }
+}
+
+/* ---------- 觸控裝置：按鈕放大到手指好按的大小 ---------- */
+
+@media (pointer: coarse) {
+  .tool, .icon-btn { min-width: 40px; min-height: 40px; }
+  .seg button { min-height: 38px; padding: 6px 14px; }
+  .note-item { padding: 12px; }
+  .btn { min-height: 44px; }
+  .menu-list button { padding: 13px 14px; }
+  .link-btn { padding: 8px 0; }
 }
