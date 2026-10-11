@@ -2,15 +2,17 @@
 
 啟動方式：
     conda activate vibe-coding
-    python main.py
-然後用瀏覽器開啟 http://127.0.0.1:5000
+    python main.py          # 只有本機可用：http://127.0.0.1:5000
+    python main.py --lan    # 同一個 Wi-Fi 的手機 / 平板也能連線
 """
+import argparse
 import base64
 import io
 import json
 import re
 import secrets
 import shutil
+import socket
 import sqlite3
 import uuid
 from datetime import date, datetime
@@ -524,5 +526,30 @@ def restore():
     return jsonify(imported=imported)
 
 
+def lan_ip():
+    """取得這台電腦在區網中的 IP（UDP connect 不會真的送出封包）。"""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        try:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+        except OSError:
+            return "127.0.0.1"
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    parser = argparse.ArgumentParser(description="Markdown 筆記本")
+    parser.add_argument("--lan", action="store_true",
+                        help="允許同一個 Wi-Fi 的手機 / 平板連線（會關閉 debug 模式）")
+    parser.add_argument("--port", type=int, default=5000)
+    args = parser.parse_args()
+
+    if args.lan:
+        print("=" * 60)
+        print(f" 手機 / 平板請在瀏覽器開啟： http://{lan_ip()}:{args.port}")
+        print(f" 本機也可以開啟：            http://127.0.0.1:{args.port}")
+        print(" 注意：同一個網路的人都連得到，請只在信任的 Wi-Fi 使用。")
+        print("=" * 60)
+        # debugger 允許執行任意程式碼，絕不能開放到區網
+        app.run(host="0.0.0.0", port=args.port, debug=False, threaded=True)
+    else:
+        app.run(host="127.0.0.1", port=args.port, debug=True)
